@@ -1,44 +1,59 @@
-# Vault with Docker Compose and Terraform
+# Vault with Kind and Vault Secrets Operator
 
-This repository provides a simple setup to run HashiCorp Vault in a Docker container using Docker Compose, and manage its configuration with Terraform.
+This project sets up a local HashiCorp Vault instance and the Vault Secrets Operator (VSO) on a Kind Kubernetes cluster. It uses Terraform to configure Vault and the VSO resources.
 
 ## Prerequisites
 
-- Docker
-- Docker Compose
-- Terraform
+Ensure you have the following tools installed on your M1 Mac:
 
-## Usage
+*   [Docker](https://docs.docker.com/get-docker/) (running)
+*   [Kind](https://kind.sigs.k8s.io/) (`brew install kind`)
+*   [Kubectl](https://kubernetes.io/docs/tasks/tools/) (`brew install kubectl`)
+*   [Helm](https://helm.sh/) (`brew install helm`)
+*   [Terraform](https://www.terraform.io/) (`brew install terraform`)
 
-1. **Start Vault:**
+## Quick Start
 
-   ```bash
-   docker-compose up -d
-   ```
-
-   This will start a Vault server in development mode, listening on `http://127.0.0.1:8200`. The root token is set to `root`.
-
-2. **Initialize and Apply Terraform:**
-
-   ```bash
-   terraform init
-   terraform apply
-   ```
-
-   This will configure the Vault provider and create a secret at `secret/data/example`.
-
-3. **Verify the Secret:**
-
-   You can verify the secret was created by running:
-
-   ```bash
-   docker-compose exec vault vault read secret/data/example
-   ```
-
-## Cleanup
-
-To stop and remove the Vault container, run:
+Run the setup script:
 
 ```bash
-docker-compose down
+./setup.sh
+```
+
+This script will:
+1.  Create a Kind cluster named `vault-demo`.
+2.  Install Vault (in dev mode) via Helm.
+3.  Install Vault Secrets Operator via Helm.
+4.  Configure Vault and the Operator using Terraform.
+5.  Verify that a sample secret is synced from Vault to a Kubernetes Secret.
+
+## Architecture
+
+*   **Vault**: Runs in `dev` mode with root token `root`. Accessible at `http://localhost:8200` via port-forwarding.
+*   **Vault Secrets Operator**: Authenticates to Vault using the Kubernetes Auth Method.
+*   **Terraform**:
+    *   Configures the Kubernetes Auth Method in Vault.
+    *   Creates a policy and role for VSO.
+    *   Creates a sample secret `secret/data/example`.
+    *   Deploys VSO CRDs (`VaultConnection`, `VaultAuth`, `VaultStaticSecret`) to sync the secret.
+
+## Manual Interaction
+
+After the script completes:
+
+*   **Kubernetes Context**: `kind-vault-demo`
+*   **Vault UI**: http://localhost:8200 (Token: `root`)
+
+To see the synced secret:
+
+```bash
+kubectl get secret k8s-secret-from-vault -o yaml
+```
+
+## Troubleshooting
+
+If the script fails at the verification step, check the status of the `VaultStaticSecret`:
+
+```bash
+kubectl get vaultstaticsecret example-secret -o yaml
 ```

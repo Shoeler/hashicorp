@@ -59,6 +59,13 @@ sleep 5
 echo -e "${GREEN}Initializing Terraform...${NC}"
 terraform init
 
+# Import the 'secret' mount if it exists (Vault Dev Mode default)
+echo -e "${BLUE}Checking for existing secret mount...${NC}"
+if ! terraform state list | grep -q "vault_mount.kvv2"; then
+  echo "Importing existing secret mount..."
+  terraform import vault_mount.kvv2 secret || true
+fi
+
 echo -e "${GREEN}Applying Terraform configuration...${NC}"
 terraform apply -auto-approve
 

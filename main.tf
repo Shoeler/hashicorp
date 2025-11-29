@@ -52,8 +52,8 @@ EOT
 resource "vault_kubernetes_auth_backend_role" "vso_role" {
   backend                          = vault_auth_backend.kubernetes.path
   role_name                        = "vso-role"
-  bound_service_account_names      = [var.vso_service_account]
-  bound_service_account_namespaces = [var.vso_namespace]
+  bound_service_account_names      = [var.vso_service_account, "default"]
+  bound_service_account_namespaces = [var.vso_namespace, "default"]
   token_policies                   = ["default", vault_policy.vso_policy.name]
   token_ttl                        = 3600
 }
@@ -88,7 +88,8 @@ resource "kubernetes_manifest" "vault_auth" {
       method = "kubernetes"
       mount  = vault_auth_backend.kubernetes.path
       kubernetes = {
-        role = vault_kubernetes_auth_backend_role.vso_role.role_name
+        role           = vault_kubernetes_auth_backend_role.vso_role.role_name
+        serviceAccount = "default"
       }
       vaultConnectionRef = "default"
     }

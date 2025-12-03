@@ -1,6 +1,7 @@
 # Vault with Kind and Vault Secrets Operator
 
-This project sets up a local HashiCorp Vault instance and the Vault Secrets Operator (VSO) on a Kind Kubernetes cluster. It uses Terraform to configure Vault and the VSO resources.  It will reinstall the KIND cluster if one already exists, so be intentional about re-running it!
+This project sets up a local HashiCorp Vault instance and the Vault Secrets Operator (VSO) on a Kind Kubernetes cluster. It uses Terraform to configure Vault and the VSO resources.  
+**It will reinstall the KIND cluster if one already exists, so be intentional about re-running it!**
 
 ## Prerequisites
 
@@ -47,9 +48,14 @@ After the script completes:
 *   **Vault UI**: http://localhost:8200 (Token: `root`) NOTE:  Sometimes the port-forward seems to die, if it does then run `kubectl port-forward svc/vault 8200:8200 >/dev/null 2>&1 &`
 
 To see the synced secret:
-
+username
 ```bash
-kubectl get secret k8s-secret-from-vault -o yaml
+kubectl get secret k8s-secret-from-vault -o jsonpath='{.data.username}' | base64 --decode
+```
+
+password:
+```bash
+kubectl get secret k8s-secret-from-vault -o jsonpath='{.data.password}' | base64 --decode
 ```
 
 ## Troubleshooting

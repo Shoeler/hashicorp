@@ -1,14 +1,15 @@
 # Vault with Kind and Vault Secrets Operator
 
 This project sets up a local HashiCorp Vault instance and the Vault Secrets Operator (VSO) on a Kind Kubernetes cluster. It uses Terraform to configure Vault and the VSO resources.  
-**It will reinstall the KIND cluster if one already exists, so be intentional about re-running it!**
+
+**This script will delete and reinstall the KIND cluster if one already exists, so be intentional about re-running it!**
 
 ## Prerequisites
 
-Ensure you have the following tools installed on your M-series Mac:
+Ensure you have the following tools preinstalled on your M-series Mac:
 
-*   [Podman](https://podman.io) ('brew install podman')
-*   [Docker](https://docs.docker.com/get-docker/) (podman machine must be running)
+*   [Podman](https://podman.io) (`brew install podman`)
+*   [Docker](https://docs.docker.com/get-docker/) (podman machine must be running and functional)
 *   [Kind](https://kind.sigs.k8s.io/) (`brew install kind`)
 *   [Kubectl](https://kubernetes.io/docs/tasks/tools/) (`brew install kubectl`)
 *   [Helm](https://helm.sh/) (`brew install helm`)
@@ -25,8 +26,8 @@ Run the setup script:
 
 This script will:
 1.  Create or recreate a Kind cluster named `vault-demo`.
-2.  Install Vault (in dev mode) via Helm.
-3.  Install Vault Secrets Operator via Helm.
+2.  Install Vault (in dev mode) via Helm to the kind cluster as a pod.
+3.  Install Vault Secrets Operator via Helm to the kind cluster.
 4.  Configure Vault and the Operator using Terraform.
 5.  Verify that a sample secret is synced from Vault to a Kubernetes Secret.
 

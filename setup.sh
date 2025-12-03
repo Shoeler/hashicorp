@@ -49,9 +49,6 @@ kubectl port-forward svc/vault 8200:8200 >/dev/null 2>&1 &
 PF_PID=$!
 echo "Port forward PID: ${PF_PID}"
 
-# Ensure we kill the port forward when the script exits
-trap "kill ${PF_PID}" EXIT
-
 echo "Waiting for port forwarding to be ready..."
 sleep 5
 

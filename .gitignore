@@ -2,7 +2,7 @@
 .terraform/
 
 # .terraform.lock.hcl files
-*.terraform.lock.hcl*
+.terraform.lock.hcl
 
 # .tfstate files
 *.tfstate
@@ -38,3 +38,4 @@ override.tf.json
 # Ignore CLI configuration files
 .terraformrc
 terraform.rc
+

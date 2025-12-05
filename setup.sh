@@ -26,6 +26,11 @@ kind create cluster --name "${CLUSTER_NAME}" --config kind-config.yaml
 
 # 3. Install Envoy Gateway
 echo -e "${GREEN}Installing Gateway API CRDs and Envoy Gateway...${NC}"
+
+# Prompt for Helm login
+echo -e "${BLUE}Please login to docker.io registry to pull Helm charts.${NC}"
+helm registry login registry-1.docker.io
+
 # Use podman to build/load images
 # Note: Helm OCI authentication might fail with default docker creds if docker desktop is not present.
 # Setting registry config to /dev/null avoids reading bad user config.
@@ -70,10 +75,10 @@ echo "Waiting for Envoy Proxy Service..."
 # For Envoy Gateway, it follows a pattern like envoy-<gateway-name>-<random> or similar,
 # but usually it's deterministic or we can find it via label selector.
 sleep 10
-EG_SVC=$(kubectl get svc -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}')
+EG_SVC=$(kubectl get svc -n default -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}')
 
 echo "Patching Envoy Service $EG_SVC to NodePort 30080..."
-kubectl patch svc $EG_SVC --type='json' -p='[{"op": "replace", "path": "/spec/type", "value": "NodePort"}, {"op": "replace", "path": "/spec/ports/0/nodePort", "value": 30080}]'
+kubectl patch svc -n default $EG_SVC --type='json' -p='[{"op": "replace", "path": "/spec/type", "value": "NodePort"}, {"op": "replace", "path": "/spec/ports/0/nodePort", "value": 30080}]'
 
 # Create HTTPRoute for Vault
 echo -e "${GREEN}Creating HTTPRoute for Vault...${NC}"
@@ -158,7 +163,10 @@ fi
 # 7. Build and Deploy Flask App
 echo -e "${GREEN}Building and deploying Flask App...${NC}"
 podman build -t flask-app:latest ./flask-app
-kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
+# Save image to archive for loading into Kind (compatible with Podman)
+podman save -o flask-app.tar flask-app:latest
+kind load image-archive flask-app.tar --name "${CLUSTER_NAME}"
+rm flask-app.tar
 
 echo -e "${GREEN}Installing Flask App Helm Chart...${NC}"
 helm install flask-app ./flask-app/chart

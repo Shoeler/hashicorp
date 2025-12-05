@@ -99,6 +99,29 @@ else
   exit 1
 fi
 
+# 7. Build and Deploy Flask App
+echo -e "${GREEN}Building and deploying Flask App...${NC}"
+docker build -t flask-app:latest ./flask-app
+kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
+
+echo -e "${GREEN}Installing Flask App Helm Chart...${NC}"
+helm install flask-app ./flask-app/chart
+
+echo -e "${BLUE}Waiting for Flask App to be ready...${NC}"
+kubectl wait --for=condition=available --timeout=60s deployment/flask-app
+
+echo -e "${GREEN}Verifying Flask App...${NC}"
+# Port forward to the flask app service
+kubectl port-forward svc/flask-app 8080:80 >/dev/null 2>&1 &
+FLASK_PID=$!
+echo "Flask App Port forward PID: ${FLASK_PID}"
+sleep 2
+
+echo "Calling /secret endpoint..."
+curl -s http://localhost:8080/secret | python3 -m json.tool
+
 echo -e "${GREEN}Setup complete!${NC}"
+echo "Flask app port forward is running with PID: ${FLASK_PID}"
+echo "To stop it, run: kill ${FLASK_PID}"
 echo "You can interact with the cluster using: kubectl --context kind-${CLUSTER_NAME}"
 echo "Vault is available at http://localhost:8200 (Token: root)"

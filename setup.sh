@@ -22,9 +22,73 @@ if kind get clusters | grep -q "^${CLUSTER_NAME}$"; then
 fi
 
 echo -e "${GREEN}Creating Kind cluster: ${CLUSTER_NAME}...${NC}"
-kind create cluster --name "${CLUSTER_NAME}"
+kind create cluster --name "${CLUSTER_NAME}" --config kind-config.yaml
 
-# 3. Install Vault and VSO
+# 3. Install Envoy Gateway
+echo -e "${GREEN}Installing Gateway API CRDs and Envoy Gateway...${NC}"
+helm install eg oci://docker.io/envoyproxy/gateway-helm/envoy-gateway \
+  --version v1.2.0 \
+  -n envoy-gateway-system \
+  --create-namespace \
+  --wait
+
+echo "Waiting for Envoy Gateway to be ready..."
+kubectl wait --namespace envoy-gateway-system \
+  --for=condition=available deployment/envoy-gateway \
+  --timeout=90s
+
+# Create Gateway Class and Gateway
+echo -e "${GREEN}Creating Gateway resource...${NC}"
+cat <<EOF | kubectl apply -f -
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: eg
+  namespace: default
+spec:
+  gatewayClassName: eg
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+EOF
+
+# Wait for the Envoy Proxy Service to be created by the Gateway
+echo "Waiting for Envoy Proxy Service..."
+# The service name is usually generated based on the Gateway name.
+# For Envoy Gateway, it follows a pattern like envoy-<gateway-name>-<random> or similar,
+# but usually it's deterministic or we can find it via label selector.
+sleep 10
+EG_SVC=$(kubectl get svc -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}')
+
+echo "Patching Envoy Service $EG_SVC to NodePort 30080..."
+kubectl patch svc $EG_SVC --type='json' -p='[{"op": "replace", "path": "/spec/type", "value": "NodePort"}, {"op": "replace", "path": "/spec/ports/0/nodePort", "value": 30080}]'
+
+# Create HTTPRoute for Vault
+echo -e "${GREEN}Creating HTTPRoute for Vault...${NC}"
+cat <<EOF | kubectl apply -f -
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: vault
+  namespace: default
+spec:
+  parentRefs:
+  - name: eg
+  rules:
+  - backendRefs:
+    - name: vault
+      port: 8200
+EOF
+
+# 4. Install Vault and VSO
 echo -e "${GREEN}Adding HashiCorp Helm repo...${NC}"
 helm repo add hashicorp https://helm.releases.hashicorp.com
 helm repo update
@@ -39,18 +103,6 @@ echo -e "${GREEN}Installing Vault Secrets Operator...${NC}"
 helm install vault-secrets-operator hashicorp/vault-secrets-operator \
   --set "defaultVaultConnection.enabled=false" \
   --wait
-
-# 4. Port Forwarding
-echo -e "${BLUE}Setting up port forwarding to Vault...${NC}"
-# Kill any existing port forward on 8200 just in case
-lsof -ti:8200 | xargs kill -9 2>/dev/null || true
-
-kubectl port-forward svc/vault 8200:8200 >/dev/null 2>&1 &
-PF_PID=$!
-echo "Port forward PID: ${PF_PID}"
-
-echo "Waiting for port forwarding to be ready..."
-sleep 5
 
 # 5. Run Terraform
 echo -e "${GREEN}Initializing Terraform...${NC}"
@@ -111,20 +163,14 @@ echo -e "${BLUE}Waiting for Flask App to be ready...${NC}"
 kubectl wait --for=condition=available --timeout=60s deployment/flask-app
 
 echo -e "${GREEN}Verifying Flask App...${NC}"
-# Port forward to the flask app service
-kubectl port-forward svc/flask-app 8080:80 >/dev/null 2>&1 &
-FLASK_PID=$!
-echo "Flask App Port forward PID: ${FLASK_PID}"
-sleep 2
-
 echo "Calling /secret endpoint..."
-curl -s http://localhost:8080/secret | python3 -m json.tool
+# We can access via localhost/secret now
+curl -s http://localhost/secret | python3 -m json.tool
 
 echo -e "${GREEN}Setup complete!${NC}"
-echo "Flask app port forward is running with PID: ${FLASK_PID}"
-echo "To stop it, run: kill ${FLASK_PID}"
 echo "You can interact with the cluster using: kubectl --context kind-${CLUSTER_NAME}"
-echo "Vault is available at http://localhost:8200 (Token: root)"
+echo "Vault UI is available at http://localhost/ui/ (Token: root)"
+echo "Flask App is available at http://localhost/secret"
 
 echo ""
 echo "To explore and modify secrets in Vault:"
@@ -134,4 +180,4 @@ echo ""
 echo "2. Inside the pod, update the secret (e.g., change username/password):"
 echo "   vault kv put secret/example username=newuser password=newpass"
 echo ""
-echo "   (Wait up to 10s for VSO to sync, then check http://localhost:8080/secret again)"
+echo "   (Wait up to 10s for VSO to sync, then check http://localhost/secret again)"

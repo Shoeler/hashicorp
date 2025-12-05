@@ -26,7 +26,11 @@ kind create cluster --name "${CLUSTER_NAME}" --config kind-config.yaml
 
 # 3. Install Envoy Gateway
 echo -e "${GREEN}Installing Gateway API CRDs and Envoy Gateway...${NC}"
-helm install eg oci://docker.io/envoyproxy/gateway-helm/envoy-gateway \
+# Use podman to build/load images
+# Note: Helm OCI authentication might fail with default docker creds if docker desktop is not present.
+# Setting registry config to /dev/null avoids reading bad user config.
+export HELM_REGISTRY_CONFIG=/dev/null
+helm install eg oci://docker.io/envoyproxy/gateway-helm \
   --version v1.2.0 \
   -n envoy-gateway-system \
   --create-namespace \
@@ -153,7 +157,7 @@ fi
 
 # 7. Build and Deploy Flask App
 echo -e "${GREEN}Building and deploying Flask App...${NC}"
-docker build -t flask-app:latest ./flask-app
+podman build -t flask-app:latest ./flask-app
 kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
 
 echo -e "${GREEN}Installing Flask App Helm Chart...${NC}"

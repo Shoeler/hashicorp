@@ -71,14 +71,30 @@ EOF
 
 # Wait for the Envoy Proxy Service to be created by the Gateway
 echo "Waiting for Envoy Proxy Service..."
-# The service name is usually generated based on the Gateway name.
-# For Envoy Gateway, it follows a pattern like envoy-<gateway-name>-<random> or similar,
-# but usually it's deterministic or we can find it via label selector.
-sleep 10
-EG_SVC=$(kubectl get svc -n default -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}')
+# Loop to find the service in any namespace (it should be in default, but we check -A to be safe and robust)
+# We also wait for it to be created.
+FOUND=false
+for i in {1..30}; do
+  SVC_INFO=$(kubectl get svc -A -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.namespace}/{.items[0].metadata.name}' 2>/dev/null || true)
+  if [ -n "$SVC_INFO" ]; then
+    EG_NS=$(echo "$SVC_INFO" | cut -d'/' -f1)
+    EG_SVC=$(echo "$SVC_INFO" | cut -d'/' -f2)
+    echo "Found Envoy Service: $EG_SVC in namespace: $EG_NS"
+    FOUND=true
+    break
+  fi
+  echo "Waiting for Envoy Service..."
+  sleep 2
+done
+
+if [ "$FOUND" = false ]; then
+  echo -e "\033[0;31mError: Envoy Proxy Service not found after waiting.\033[0m"
+  kubectl get svc -A
+  exit 1
+fi
 
 echo "Patching Envoy Service $EG_SVC to NodePort 30080..."
-kubectl patch svc -n default $EG_SVC --type='json' -p='[{"op": "replace", "path": "/spec/type", "value": "NodePort"}, {"op": "replace", "path": "/spec/ports/0/nodePort", "value": 30080}]'
+kubectl patch svc -n "$EG_NS" "$EG_SVC" --type='json' -p='[{"op": "replace", "path": "/spec/type", "value": "NodePort"}, {"op": "replace", "path": "/spec/ports/0/nodePort", "value": 30080}]'
 
 # Create HTTPRoute for Vault
 echo -e "${GREEN}Creating HTTPRoute for Vault...${NC}"

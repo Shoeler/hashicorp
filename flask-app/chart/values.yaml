@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: flask-app
-  pullPolicy: IfNotPresent
+  pullPolicy: Never
   tag: "latest"
 
 service:

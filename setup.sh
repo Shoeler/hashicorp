@@ -26,14 +26,10 @@ kind create cluster --name "${CLUSTER_NAME}" --config kind-config.yaml
 
 # 3. Install Envoy Gateway
 echo -e "${GREEN}Installing Gateway API CRDs and Envoy Gateway...${NC}"
-
-# Prompt for Helm login
-echo -e "${BLUE} Logging into registry using token to pull Helm charts.${NC}"
-helm registry login registry-1.docker.io -u schuylerb -p dckr_pat_OYWqX1Ly6v43mQVN0BB6x5e7PxU
-
 # Use podman to build/load images
 # Note: Helm OCI authentication might fail with default docker creds if docker desktop is not present.
 # Setting registry config to /dev/null avoids reading bad user config.
+# export HELM_REGISTRY_CONFIG=/dev/null # This did not work
 helm install eg oci://docker.io/envoyproxy/gateway-helm \
   --version v1.2.0 \
   -n envoy-gateway-system \
@@ -70,30 +66,14 @@ EOF
 
 # Wait for the Envoy Proxy Service to be created by the Gateway
 echo "Waiting for Envoy Proxy Service..."
-# Loop to find the service in any namespace (it should be in default, but we check -A to be safe and robust)
-# We also wait for it to be created.
-FOUND=false
-for i in {1..30}; do
-  SVC_INFO=$(kubectl get svc -A -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.namespace}/{.items[0].metadata.name}' 2>/dev/null || true)
-  if [ -n "$SVC_INFO" ]; then
-    EG_NS=$(echo "$SVC_INFO" | cut -d'/' -f1)
-    EG_SVC=$(echo "$SVC_INFO" | cut -d'/' -f2)
-    echo "Found Envoy Service: $EG_SVC in namespace: $EG_NS"
-    FOUND=true
-    break
-  fi
-  echo "Waiting for Envoy Service..."
-  sleep 2
-done
-
-if [ "$FOUND" = false ]; then
-  echo -e "\033[0;31mError: Envoy Proxy Service not found after waiting.\033[0m"
-  kubectl get svc -A
-  exit 1
-fi
+# The service name is usually generated based on the Gateway name.
+# For Envoy Gateway, it follows a pattern like envoy-<gateway-name>-<random> or similar,
+# but usually it's deterministic or we can find it via label selector.
+sleep 10
+EG_SVC=$(kubectl get svc -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}' -n envoy-gateway-system)
 
 echo "Patching Envoy Service $EG_SVC to NodePort 30080..."
-kubectl patch svc -n "$EG_NS" "$EG_SVC" --type='json' -p='[{"op": "replace", "path": "/spec/type", "value": "NodePort"}, {"op": "replace", "path": "/spec/ports/0/nodePort", "value": 30080}]'
+kubectl patch svc $EG_SVC --type='json' -p='[{"op": "replace", "path": "/spec/type", "value": "NodePort"}, {"op": "replace", "path": "/spec/ports/0/nodePort", "value": 30080}]' -n envoy-gateway-system
 
 # Create HTTPRoute for Vault
 echo -e "${GREEN}Creating HTTPRoute for Vault...${NC}"
@@ -178,10 +158,8 @@ fi
 # 7. Build and Deploy Flask App
 echo -e "${GREEN}Building and deploying Flask App...${NC}"
 podman build -t flask-app:latest ./flask-app
-# Save image to archive for loading into Kind (compatible with Podman)
-podman save -o flask-app.tar flask-app:latest
-kind load image-archive flask-app.tar --name "${CLUSTER_NAME}"
-rm flask-app.tar
+kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
+kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
 
 echo -e "${GREEN}Installing Flask App Helm Chart...${NC}"
 helm install flask-app ./flask-app/chart

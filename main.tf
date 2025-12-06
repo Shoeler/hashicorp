@@ -114,6 +114,13 @@ resource "kubernetes_manifest" "vault_static_secret" {
         name   = "k8s-secret-from-vault"
       }
       vaultAuthRef = "default"
+      refreshAfter = "10s"
+      rolloutRestartTargets = [
+        {
+          kind = "Deployment"
+          name = "flask-app"
+        }
+      ]
     }
   }
 }

@@ -1,0 +1,14 @@
+replicaCount: 1
+
+image:
+  repository: flask-app
+  pullPolicy: Never
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 5000
+
+secret:
+  name: k8s-secret-from-vault

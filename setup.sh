@@ -28,13 +28,12 @@ kind create cluster --name "${CLUSTER_NAME}" --config kind-config.yaml
 echo -e "${GREEN}Installing Gateway API CRDs and Envoy Gateway...${NC}"
 
 # Prompt for Helm login
-echo -e "${BLUE}Please login to docker.io registry to pull Helm charts.${NC}"
-helm registry login registry-1.docker.io
+echo -e "${BLUE} Logging into registry using token to pull Helm charts.${NC}"
+helm registry login registry-1.docker.io -u schuylerb -p dckr_pat_OYWqX1Ly6v43mQVN0BB6x5e7PxU
 
 # Use podman to build/load images
 # Note: Helm OCI authentication might fail with default docker creds if docker desktop is not present.
 # Setting registry config to /dev/null avoids reading bad user config.
-export HELM_REGISTRY_CONFIG=/dev/null
 helm install eg oci://docker.io/envoyproxy/gateway-helm \
   --version v1.2.0 \
   -n envoy-gateway-system \

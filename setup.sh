@@ -62,6 +62,13 @@ spec:
   - name: http
     protocol: HTTP
     port: 80
+  - name: https
+    protocol: HTTPS
+    port: 443
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: flask-app-tls
 EOF
 
 # Wait for the Envoy Proxy Service to be created by the Gateway
@@ -72,8 +79,10 @@ echo "Waiting for Envoy Proxy Service..."
 sleep 10
 EG_SVC=$(kubectl get svc -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}' -n envoy-gateway-system)
 
-echo "Patching Envoy Service $EG_SVC to NodePort 30080..."
-kubectl patch svc $EG_SVC --type='json' -p='[{"op": "replace", "path": "/spec/type", "value": "NodePort"}, {"op": "replace", "path": "/spec/ports/0/nodePort", "value": 30080}]' -n envoy-gateway-system
+echo "Patching Envoy Service $EG_SVC to NodePort 30080 and 30443..."
+# We use the default strategic merge patch (no --type flag) because it merges the 'ports' list by the 'port' key.
+# This ensures we update the 'nodePort' for existing ports without overwriting 'targetPort' or other fields.
+kubectl patch svc $EG_SVC -p='{"spec": {"type": "NodePort", "ports": [{"port": 80, "nodePort": 30080}, {"port": 443, "nodePort": 30443}]}}' -n envoy-gateway-system
 
 # Create HTTPRoute for Vault
 echo -e "${GREEN}Creating HTTPRoute for Vault...${NC}"
@@ -132,16 +141,16 @@ SLEEP=5
 FOUND=false
 
 for ((i=1; i<=RETRIES; i++)); do
-  if kubectl get secret k8s-secret-from-vault >/dev/null 2>&1; then
+  if kubectl get secret k8s-secret-from-vault >/dev/null 2>&1 && kubectl get secret flask-app-tls >/dev/null 2>&1; then
     FOUND=true
     break
   fi
-  echo "Attempt $i/$RETRIES: Secret not found yet..."
+  echo "Attempt $i/$RETRIES: Secrets not found yet..."
   sleep $SLEEP
 done
 
 if [ "$FOUND" = true ]; then
-  echo -e "${GREEN}Success! Secret 'k8s-secret-from-vault' found.${NC}"
+  echo -e "${GREEN}Success! Secrets 'k8s-secret-from-vault' and 'flask-app-tls' found.${NC}"
   echo "Content:"
   kubectl get secret k8s-secret-from-vault -o jsonpath='{.data.username}' | base64 --decode
   echo ""
@@ -172,10 +181,13 @@ echo "Calling /secret endpoint..."
 # We can access via localhost/secret now
 curl -s http://localhost/secret | python3 -m json.tool
 
+echo "Calling https://localhost/secret endpoint..."
+curl -sk https://localhost/secret | python3 -m json.tool
+
 echo -e "${GREEN}Setup complete!${NC}"
 echo "You can interact with the cluster using: kubectl --context kind-${CLUSTER_NAME}"
 echo "Vault UI is available at http://localhost/ui/ (Token: root)"
-echo "Flask App is available at http://localhost/secret"
+echo "Flask App is available at http://localhost/secret or https://localhost/secret"
 
 echo ""
 echo "To explore and modify secrets in Vault:"

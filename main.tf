@@ -18,6 +18,31 @@ resource "vault_kv_secret_v2" "example" {
   )
 }
 
+# Enable PKI secrets engine
+resource "vault_mount" "pki" {
+  path        = "pki"
+  type        = "pki"
+  description = "PKI backend"
+}
+
+# Configure Root CA
+resource "vault_pki_secret_backend_root_cert" "root" {
+  backend = vault_mount.pki.path
+  type    = "internal"
+  common_name = "example.com"
+  ttl = "87600h"
+}
+
+# Configure PKI Role
+resource "vault_pki_secret_backend_role" "role" {
+  backend = vault_mount.pki.path
+  name    = "flask-app-role"
+  allowed_domains = ["example.com", "flask-app.default.svc"]
+  allow_subdomains = true
+  allow_bare_domains = true
+  max_ttl = "72h"
+}
+
 # Enable Kubernetes Auth
 resource "vault_auth_backend" "kubernetes" {
   type = "kubernetes"
@@ -45,6 +70,9 @@ path "secret/data/*" {
 path "secret/metadata/*" {
   capabilities = ["list"]
 }
+path "pki/issue/*" {
+  capabilities = ["create", "update"]
+}
 EOT
 }
 
@@ -71,6 +99,36 @@ resource "kubernetes_manifest" "vault_connection" {
     }
     spec = {
       address = "http://vault.default.svc:8200"
+    }
+  }
+}
+
+# 4. VaultPKISecret
+resource "kubernetes_manifest" "vault_pki_secret" {
+  manifest = {
+    apiVersion = "secrets.hashicorp.com/v1beta1"
+    kind       = "VaultPKISecret"
+    metadata = {
+      name      = "flask-app-cert"
+      namespace = "default"
+    }
+    spec = {
+      vaultAuthRef = "default"
+      mount        = vault_mount.pki.path
+      role         = vault_pki_secret_backend_role.role.name
+      commonName   = "flask-app.default.svc"
+      format       = "pem"
+      destination = {
+        create = true
+        name   = "flask-app-tls"
+        type   = "kubernetes.io/tls"
+      }
+      rolloutRestartTargets = [
+        {
+          kind = "Deployment"
+          name = "flask-app"
+        }
+      ]
     }
   }
 }

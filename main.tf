@@ -39,6 +39,7 @@ resource "vault_pki_secret_backend_role" "role" {
   name    = "flask-app-role"
   allowed_domains = ["example.com", "flask-app.default.svc"]
   allow_subdomains = true
+  allow_bare_domains = true
   max_ttl = "72h"
 }
 

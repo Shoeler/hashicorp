@@ -62,48 +62,18 @@ spec:
   - name: http
     protocol: HTTP
     port: 80
-  - name: https
-    protocol: HTTPS
-    port: 443
-    tls:
-      mode: Terminate
-      certificateRefs:
-      - name: flask-app-tls
 EOF
 
-# Wait for the Envoy Proxy Service to be created by the Gateway and have port 443
-echo "Waiting for Envoy Proxy Service and port 443..."
-RETRIES=30
-SLEEP=5
-EG_SVC=""
+# Wait for the Envoy Proxy Service to be created by the Gateway
+echo "Waiting for Envoy Proxy Service..."
+# The service name is usually generated based on the Gateway name.
+# For Envoy Gateway, it follows a pattern like envoy-<gateway-name>-<random> or similar,
+# but usually it's deterministic or we can find it via label selector.
+sleep 10
+EG_SVC=$(kubectl get svc -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}' -n envoy-gateway-system)
 
-for ((i=1; i<=RETRIES; i++)); do
-  # Try to find the service name
-  EG_SVC=$(kubectl get svc -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}' -n envoy-gateway-system 2>/dev/null)
-
-  if [ -n "$EG_SVC" ]; then
-    # Check if port 443 is present in the service spec
-    HAS_443=$(kubectl get svc "$EG_SVC" -n envoy-gateway-system -o jsonpath='{.spec.ports[?(@.port==443)].port}')
-
-    if [ -n "$HAS_443" ]; then
-      echo "Service $EG_SVC found with port 443 ready."
-      break
-    fi
-  fi
-
-  echo "Attempt $i/$RETRIES: Service not found or port 443 not ready yet..."
-  sleep $SLEEP
-done
-
-if [ -z "$EG_SVC" ] || [ -z "$HAS_443" ]; then
-  echo "Error: Envoy Proxy Service or port 443 failed to appear."
-  exit 1
-fi
-
-echo "Patching Envoy Service $EG_SVC to NodePort 30080 and 30443..."
-# We use the default strategic merge patch (no --type flag) because it merges the 'ports' list by the 'port' key.
-# This ensures we update the 'nodePort' for existing ports without overwriting 'targetPort' or other fields.
-kubectl patch svc $EG_SVC -p='{"spec": {"type": "NodePort", "ports": [{"port": 80, "nodePort": 30080}, {"port": 443, "nodePort": 30443}]}}' -n envoy-gateway-system
+echo "Patching Envoy Service $EG_SVC to NodePort 30080..."
+kubectl patch svc $EG_SVC --type='json' -p='[{"op": "replace", "path": "/spec/type", "value": "NodePort"}, {"op": "replace", "path": "/spec/ports/0/nodePort", "value": 30080}]' -n envoy-gateway-system
 
 # Create HTTPRoute for Vault
 echo -e "${GREEN}Creating HTTPRoute for Vault...${NC}"
@@ -151,6 +121,54 @@ fi
 
 echo -e "${GREEN}Applying Terraform configuration...${NC}"
 terraform apply -auto-approve
+
+# 5.5. Enable HTTPS on Gateway
+# Now that Terraform has run, the flask-app-tls secret should exist (or be creating).
+# We can now add the HTTPS listener to the Gateway.
+
+echo -e "${GREEN}Updating Gateway to include HTTPS listener...${NC}"
+kubectl patch gateway eg --type='json' -p='[
+  {"op": "add", "path": "/spec/listeners/-", "value": {
+    "name": "https",
+    "protocol": "HTTPS",
+    "port": 443,
+    "tls": {
+      "mode": "Terminate",
+      "certificateRefs": [{"name": "flask-app-tls"}]
+    }
+  }}
+]' -n default
+
+# Wait for the Envoy Proxy Service to be updated with port 443
+echo "Waiting for Envoy Proxy Service to add port 443..."
+RETRIES=30
+SLEEP=5
+FOUND_PORT=false
+
+EG_SVC=$(kubectl get svc -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}' -n envoy-gateway-system)
+
+for ((i=1; i<=RETRIES; i++)); do
+  HAS_443=$(kubectl get svc "$EG_SVC" -n envoy-gateway-system -o jsonpath='{.spec.ports[?(@.port==443)].port}' 2>/dev/null)
+
+  if [ -n "$HAS_443" ]; then
+    echo "Service $EG_SVC has port 443."
+    FOUND_PORT=true
+    break
+  fi
+
+  echo "Attempt $i/$RETRIES: Port 443 not ready yet..."
+  sleep $SLEEP
+done
+
+if [ "$FOUND_PORT" = false ]; then
+  echo "Error: Port 443 failed to appear on Envoy Service."
+  exit 1
+fi
+
+echo "Patching Envoy Service $EG_SVC to NodePort 30443..."
+# Use strategic merge patch to update port 443 without affecting port 80
+kubectl patch svc $EG_SVC -p='{"spec": {"ports": [{"port": 443, "nodePort": 30443}]}}' -n envoy-gateway-system
+
 
 # 6. Verification
 echo -e "${BLUE}Verifying setup...${NC}"

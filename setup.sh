@@ -71,13 +71,34 @@ spec:
       - name: flask-app-tls
 EOF
 
-# Wait for the Envoy Proxy Service to be created by the Gateway
-echo "Waiting for Envoy Proxy Service..."
-# The service name is usually generated based on the Gateway name.
-# For Envoy Gateway, it follows a pattern like envoy-<gateway-name>-<random> or similar,
-# but usually it's deterministic or we can find it via label selector.
-sleep 10
-EG_SVC=$(kubectl get svc -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}' -n envoy-gateway-system)
+# Wait for the Envoy Proxy Service to be created by the Gateway and have port 443
+echo "Waiting for Envoy Proxy Service and port 443..."
+RETRIES=30
+SLEEP=5
+EG_SVC=""
+
+for ((i=1; i<=RETRIES; i++)); do
+  # Try to find the service name
+  EG_SVC=$(kubectl get svc -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}' -n envoy-gateway-system 2>/dev/null)
+
+  if [ -n "$EG_SVC" ]; then
+    # Check if port 443 is present in the service spec
+    HAS_443=$(kubectl get svc "$EG_SVC" -n envoy-gateway-system -o jsonpath='{.spec.ports[?(@.port==443)].port}')
+
+    if [ -n "$HAS_443" ]; then
+      echo "Service $EG_SVC found with port 443 ready."
+      break
+    fi
+  fi
+
+  echo "Attempt $i/$RETRIES: Service not found or port 443 not ready yet..."
+  sleep $SLEEP
+done
+
+if [ -z "$EG_SVC" ] || [ -z "$HAS_443" ]; then
+  echo "Error: Envoy Proxy Service or port 443 failed to appear."
+  exit 1
+fi
 
 echo "Patching Envoy Service $EG_SVC to NodePort 30080 and 30443..."
 # We use the default strategic merge patch (no --type flag) because it merges the 'ports' list by the 'port' key.

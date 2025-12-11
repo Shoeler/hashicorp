@@ -216,12 +216,12 @@ echo -e "${BLUE}Waiting for Flask App to be ready...${NC}"
 kubectl wait --for=condition=available --timeout=60s deployment/flask-app
 
 echo -e "${GREEN}Verifying Flask App...${NC}"
-echo "Calling /secret endpoint..."
+echo "Calling /secret endpoint via HTTP..."
 # We can access via localhost/secret now
-curl -s http://localhost/secret | python3 -m json.tool
+curl -s http://localhost/secret | jq
 
-echo "Calling https://localhost/secret endpoint..."
-curl -sk https://localhost/secret | python3 -m json.tool
+echo "Calling https://localhost/secret endpoint via HTTPS..."
+curl -sk https://localhost/secret | jq
 
 echo -e "${GREEN}Setup complete!${NC}"
 echo "You can interact with the cluster using: kubectl --context kind-${CLUSTER_NAME}"

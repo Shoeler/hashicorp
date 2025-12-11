@@ -2,6 +2,7 @@ from flask import Flask, jsonify
 import os
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
+from cryptography.x509.oid import NameOID
 
 app = Flask(__name__)
 
@@ -9,6 +10,7 @@ app = Flask(__name__)
 def get_secret():
     username = os.environ.get('SECRET_USERNAME')
     password = os.environ.get('SECRET_PASSWORD')
+    cert = None
 
     if not username or not password:
         # Fallback to file reading if env vars are not set
@@ -26,9 +28,9 @@ def get_secret():
             with open('/etc/certs/tls.crt', 'rb') as f:
                 cert_data = f.read()
                 cert = x509.load_pem_x509_certificate(cert_data, default_backend())
-                # Get the Common Name
+                # Get the Common Name and Serial Number
                 for attribute in cert.subject:
-                    if attribute.oid == x509.NameOID.COMMON_NAME:
+                    if attribute.oid == NameOID.COMMON_NAME:
                         cert_info = f"CN={attribute.value}"
                         break
         else:
@@ -40,7 +42,8 @@ def get_secret():
     return jsonify({
         "username": username,
         "password": password,
-        "certificate": cert_info
+        "certificate": cert_info,
+        "serial_number": cert.serial_number if cert is not None else None
     })
 
 if __name__ == '__main__':

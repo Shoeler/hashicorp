@@ -38,12 +38,13 @@ def get_secret():
 
     except Exception as e:
         cert_info = f"Error reading certificate: {str(e)}"
+    serialNumber = hex(cert.serial_number)
 
     return jsonify({
         "username": username,
         "password": password,
         "certificate": cert_info,
-        "serial_number": cert.serial_number if cert is not None else None
+        "serial_number": serialNumber
     })
 
 if __name__ == '__main__':

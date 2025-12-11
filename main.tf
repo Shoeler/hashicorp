@@ -1,3 +1,4 @@
+# --- Vault Configuration ---
 resource "vault_mount" "kvv2" {
   path        = "secret"
   type        = "kv"
@@ -103,36 +104,6 @@ resource "kubernetes_manifest" "vault_connection" {
   }
 }
 
-# 4. VaultPKISecret
-resource "kubernetes_manifest" "vault_pki_secret" {
-  manifest = {
-    apiVersion = "secrets.hashicorp.com/v1beta1"
-    kind       = "VaultPKISecret"
-    metadata = {
-      name      = "flask-app-cert"
-      namespace = "default"
-    }
-    spec = {
-      vaultAuthRef = "default"
-      mount        = vault_mount.pki.path
-      role         = vault_pki_secret_backend_role.role.name
-      commonName   = "flask-app.default.svc"
-      format       = "pem"
-      destination = {
-        create = true
-        name   = "flask-app-tls"
-        type   = "kubernetes.io/tls"
-      }
-      rolloutRestartTargets = [
-        {
-          kind = "Deployment"
-          name = "flask-app"
-        }
-      ]
-    }
-  }
-}
-
 # 2. VaultAuth
 resource "kubernetes_manifest" "vault_auth" {
   manifest = {
@@ -173,6 +144,36 @@ resource "kubernetes_manifest" "vault_static_secret" {
       }
       vaultAuthRef = "default"
       refreshAfter = "10s"
+      rolloutRestartTargets = [
+        {
+          kind = "Deployment"
+          name = "flask-app"
+        }
+      ]
+    }
+  }
+}
+
+# 4. VaultPKISecret
+resource "kubernetes_manifest" "vault_pki_secret" {
+  manifest = {
+    apiVersion = "secrets.hashicorp.com/v1beta1"
+    kind       = "VaultPKISecret"
+    metadata = {
+      name      = "flask-app-cert"
+      namespace = "default"
+    }
+    spec = {
+      vaultAuthRef = "default"
+      mount        = vault_mount.pki.path
+      role         = vault_pki_secret_backend_role.role.name
+      commonName   = "flask-app.default.svc"
+      format       = "pem"
+      destination = {
+        create = true
+        name   = "flask-app-tls"
+        type   = "kubernetes.io/tls"
+      }
       rolloutRestartTargets = [
         {
           kind = "Deployment"

@@ -16,6 +16,7 @@ Ensure you have the following tools preinstalled on your Mac:
 *   [Kubectl](https://kubernetes.io/docs/tasks/tools/) (`brew install kubectl`)
 *   [Helm](https://helm.sh/) (`brew install helm`)
 *   [tfenv](https://github.com/tfutils/tfenv) (`brew install tfenv && tfenv install && tfenv use`) - optional but strongly suggested
+*   [terraform](https://developer.hashicorp.com/terraform) - optional in case you don't want to use tfenv
 
 ## Quick Start
 

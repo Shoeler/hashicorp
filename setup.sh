@@ -216,6 +216,8 @@ fi
 echo -e "${GREEN}Building and deploying Flask App...${NC}"
 podman build -t flask-app:latest ./flask-app
 kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
+# This has to run twice because it doesn't tag it properly the first time
+kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
 # The second load was duplicated in original file, removing it
 # kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
 

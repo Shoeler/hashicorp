@@ -22,6 +22,14 @@ Run the setup script:
 ./setup.sh
 ```
 
+## Quick re-deploy of the app-only
+
+Run the setup script with --redeploy-flask:
+
+```bash
+./setup.sh --redeploy-flask
+```
+
 This script will:
 1.  Create or recreate a Kind cluster named `vault-demo`.
 2.  Install envoy gateway via Helm to handle cluster ingress

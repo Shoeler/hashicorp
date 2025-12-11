@@ -216,9 +216,12 @@ echo -e "${BLUE}Waiting for Flask App to be ready...${NC}"
 kubectl wait --for=condition=available --timeout=60s deployment/flask-app
 
 echo -e "${GREEN}Verifying Flask App...${NC}"
-echo "Calling /secret endpoint..."
+echo "Calling /secret endpoint via HTTP..."
 # We can access via localhost/secret now
-curl -s http://localhost/secret | python3 -m json.tool
+curl -s http://localhost/secret | jq
+
+echo "Calling https://localhost/secret endpoint via HTTPS..."
+curl -sk https://localhost/secret | jq
 
 echo "Calling https://localhost/secret endpoint..."
 curl -sk https://localhost/secret | python3 -m json.tool
@@ -237,3 +240,9 @@ echo "2. Inside the pod, update the secret (e.g., change username/password):"
 echo "   vault kv put secret/example username=newuser password=newpass"
 echo ""
 echo "   (Wait up to 10s for VSO to sync, then check http://localhost/secret again)"
+echo ""
+echo "To see the status of the synced k8s certificate:"
+echo "    kubectl describe VaultPKISecret flask-app-cert"
+echo ""
+echo "To see the serial number of the issued certificate:"
+echo "    kubectl exec -it <flask-app-pod-name> -- openssl x509 -in /tls/tls.crt -noout -serial"

@@ -122,6 +122,54 @@ fi
 echo -e "${GREEN}Applying Terraform configuration...${NC}"
 terraform apply -auto-approve
 
+# 5.5. Enable HTTPS on Gateway
+# Now that Terraform has run, the flask-app-tls secret should exist (or be creating).
+# We can now add the HTTPS listener to the Gateway.
+
+echo -e "${GREEN}Updating Gateway to include HTTPS listener...${NC}"
+kubectl patch gateway eg --type='json' -p='[
+  {"op": "add", "path": "/spec/listeners/-", "value": {
+    "name": "https",
+    "protocol": "HTTPS",
+    "port": 443,
+    "tls": {
+      "mode": "Terminate",
+      "certificateRefs": [{"name": "flask-app-tls"}]
+    }
+  }}
+]' -n default
+
+# Wait for the Envoy Proxy Service to be updated with port 443
+echo "Waiting for Envoy Proxy Service to add port 443..."
+RETRIES=30
+SLEEP=5
+FOUND_PORT=false
+
+EG_SVC=$(kubectl get svc -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}' -n envoy-gateway-system)
+
+for ((i=1; i<=RETRIES; i++)); do
+  HAS_443=$(kubectl get svc "$EG_SVC" -n envoy-gateway-system -o jsonpath='{.spec.ports[?(@.port==443)].port}' 2>/dev/null)
+
+  if [ -n "$HAS_443" ]; then
+    echo "Service $EG_SVC has port 443."
+    FOUND_PORT=true
+    break
+  fi
+
+  echo "Attempt $i/$RETRIES: Port 443 not ready yet..."
+  sleep $SLEEP
+done
+
+if [ "$FOUND_PORT" = false ]; then
+  echo "Error: Port 443 failed to appear on Envoy Service."
+  exit 1
+fi
+
+echo "Patching Envoy Service $EG_SVC to NodePort 30443..."
+# Use strategic merge patch to update port 443 without affecting port 80
+kubectl patch svc $EG_SVC -p='{"spec": {"ports": [{"port": 443, "nodePort": 30443}]}}' -n envoy-gateway-system
+
+
 # 6. Verification
 echo -e "${BLUE}Verifying setup...${NC}"
 echo "Waiting for Vault Secrets Operator to sync the secret..."
@@ -132,16 +180,16 @@ SLEEP=5
 FOUND=false
 
 for ((i=1; i<=RETRIES; i++)); do
-  if kubectl get secret k8s-secret-from-vault >/dev/null 2>&1; then
+  if kubectl get secret k8s-secret-from-vault >/dev/null 2>&1 && kubectl get secret flask-app-tls >/dev/null 2>&1; then
     FOUND=true
     break
   fi
-  echo "Attempt $i/$RETRIES: Secret not found yet..."
+  echo "Attempt $i/$RETRIES: Secrets not found yet..."
   sleep $SLEEP
 done
 
 if [ "$FOUND" = true ]; then
-  echo -e "${GREEN}Success! Secret 'k8s-secret-from-vault' found.${NC}"
+  echo -e "${GREEN}Success! Secrets 'k8s-secret-from-vault' and 'flask-app-tls' found.${NC}"
   echo "Content:"
   kubectl get secret k8s-secret-from-vault -o jsonpath='{.data.username}' | base64 --decode
   echo ""
@@ -172,10 +220,13 @@ echo "Calling /secret endpoint..."
 # We can access via localhost/secret now
 curl -s http://localhost/secret | python3 -m json.tool
 
+echo "Calling https://localhost/secret endpoint..."
+curl -sk https://localhost/secret | python3 -m json.tool
+
 echo -e "${GREEN}Setup complete!${NC}"
 echo "You can interact with the cluster using: kubectl --context kind-${CLUSTER_NAME}"
 echo "Vault UI is available at http://localhost/ui/ (Token: root)"
-echo "Flask App is available at http://localhost/secret"
+echo "Flask App is available at http://localhost/secret or https://localhost/secret"
 
 echo ""
 echo "To explore and modify secrets in Vault:"

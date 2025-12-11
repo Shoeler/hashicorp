@@ -73,6 +73,12 @@ After the script completes:
 *   **Test APP (HTTP)**: http://localhost/secret
 *   **Test APP (HTTPS)**: https://localhost/secret
 
+To force a rotation of the TLS cert:
+
+```bash
+kubectl delete secret flask-app-tls
+```
+
 To see the synced secret:
 
 username:

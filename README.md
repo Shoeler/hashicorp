@@ -6,8 +6,11 @@ This project sets up a local HashiCorp Vault instance and the Vault Secrets Oper
 
 ## Prerequisites
 
-Ensure you have the following tools preinstalled on your M-series Mac:
+I have built this to run on my local M-series MacBook - so YMMV.
 
+Ensure you have the following tools preinstalled on your Mac:
+
+*   [Homebrew](https://brew.sh/)
 *   [Podman](https://podman.io) (`brew install podman && podman machine init && podman machine start`)
 *   [Kind](https://kind.sigs.k8s.io/) (`brew install kind`)
 *   [Kubectl](https://kubernetes.io/docs/tasks/tools/) (`brew install kubectl`)

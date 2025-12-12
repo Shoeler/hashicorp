@@ -243,6 +243,7 @@ echo "Calling https://localhost/secret endpoint via HTTPS..."
 curl -sk https://localhost/secret | jq
 
 echo "Calling https://localhost/secret endpoint..."
+sleep 5
 curl -sk https://localhost/secret | jq
 
 echo -e "${GREEN}Setup complete!${NC}"

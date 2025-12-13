@@ -92,7 +92,7 @@ data "kubernetes_resources" "envoy_deployment" {
   api_version    = "apps/v1"
   kind           = "Deployment"
   namespace      = "envoy-gateway-system"
-  label_selector = "gateway.envoyproxy.io/owning-gateway-name=eg,gateway.envoyproxy.io/owning-gateway-namespace=default"
+  label_selector = "gateway.envoyproxy.io/owning-gateway-name=eg"
 }
 
 locals {
@@ -130,6 +130,10 @@ resource "kubernetes_manifest" "vault_connection" {
       address = "http://vault.default.svc:8200"
     }
   }
+}
+
+output "envoy_deployment_name" {
+  value = local.envoy_deploy_name
 }
 
 # 2. VaultAuth

@@ -189,7 +189,9 @@ SLEEP=5
 FOUND=false
 
 for ((i=1; i<=RETRIES; i++)); do
-  if kubectl get secret k8s-secret-from-vault >/dev/null 2>&1 && kubectl get secret flask-app-tls >/dev/null 2>&1; then
+  if kubectl get secret k8s-secret-from-vault >/dev/null 2>&1 && \
+     kubectl get secret flask-app-tls >/dev/null 2>&1 && \
+     kubectl get secret flask-app-tls -n envoy-gateway-system >/dev/null 2>&1; then
     FOUND=true
     break
   fi
@@ -209,7 +211,22 @@ else
   # Debug info
   echo "Checking VaultStaticSecret status:"
   kubectl get vaultstaticsecret example-secret -o yaml
+  echo "Checking VaultPKISecret status in envoy-gateway-system:"
+  kubectl get vaultpkisecret flask-app-cert-envoy -n envoy-gateway-system -o yaml
   exit 1
+fi
+
+# Verify rolloutRestartTargets in Envoy Gateway System
+echo "Verifying Envoy Deployment target in VaultPKISecret..."
+TARGETS=$(kubectl get vaultpkisecret flask-app-cert-envoy -n envoy-gateway-system -o jsonpath='{.spec.rolloutRestartTargets}')
+if [ -z "$TARGETS" ] || [ "$TARGETS" == "[]" ]; then
+    echo -e "\033[0;31mWarning: No rolloutRestartTargets found in flask-app-cert-envoy. Envoy restart may not work.\033[0m"
+    echo "Found Envoy Deployment Name from Terraform output:"
+    terraform output envoy_deployment_name || echo "Terraform output not available."
+    echo "Available deployments in envoy-gateway-system:"
+    kubectl get deploy -n envoy-gateway-system --show-labels
+else
+    echo -e "${GREEN}Rollout targets configured: $TARGETS${NC}"
 fi
 
 # 7. Build and Deploy Flask App

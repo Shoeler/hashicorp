@@ -143,7 +143,7 @@ EOF
       "port": 443,
       "tls": {
         "mode": "Terminate",
-        "certificateRefs": [{"name": "flask-app-tls"}]
+        "certificateRefs": [{"name": "flask-app-tls", "namespace": "envoy-gateway-system"}]
       }
     }}
   ]' -n default

@@ -82,9 +82,37 @@ resource "vault_kubernetes_auth_backend_role" "vso_role" {
   backend                          = vault_auth_backend.kubernetes.path
   role_name                        = "vso-role"
   bound_service_account_names      = [var.vso_service_account, "default"]
-  bound_service_account_namespaces = [var.vso_namespace, "default"]
+  bound_service_account_namespaces = [var.vso_namespace, "default", "envoy-gateway-system"]
   token_policies                   = ["default", vault_policy.vso_policy.name]
   token_ttl                        = 3600
+}
+
+# --- Data Source to find Envoy Deployment ---
+data "kubernetes_resources" "envoy_deployment" {
+  api_version    = "apps/v1"
+  kind           = "Deployment"
+  namespace      = "envoy-gateway-system"
+  label_selector = "gateway.envoyproxy.io/owning-gateway-name=eg,gateway.envoyproxy.io/owning-gateway-namespace=default"
+}
+
+locals {
+  envoy_deploy_name = try(data.kubernetes_resources.envoy_deployment.objects[0].metadata[0].name, "")
+
+  rollout_targets = concat(
+    [
+      {
+        kind = "Deployment"
+        name = "flask-app"
+      }
+    ],
+    local.envoy_deploy_name != "" ? [
+      {
+        kind      = "Deployment"
+        name      = local.envoy_deploy_name
+        namespace = "envoy-gateway-system"
+      }
+    ] : []
+  )
 }
 
 # --- Vault Secrets Operator CRDs ---
@@ -144,17 +172,12 @@ resource "kubernetes_manifest" "vault_static_secret" {
       }
       vaultAuthRef = "default"
       refreshAfter = "10s"
-      rolloutRestartTargets = [
-        {
-          kind = "Deployment"
-          name = "flask-app"
-        }
-      ]
+      rolloutRestartTargets = local.rollout_targets
     }
   }
 }
 
-# 4. VaultPKISecret
+# 4. VaultPKISecret (for Flask App in default namespace)
 resource "kubernetes_manifest" "vault_pki_secret" {
   manifest = {
     apiVersion = "secrets.hashicorp.com/v1beta1"
@@ -178,6 +201,102 @@ resource "kubernetes_manifest" "vault_pki_secret" {
         {
           kind = "Deployment"
           name = "flask-app"
+        }
+      ]
+    }
+  }
+}
+
+# --- Resources for Envoy Gateway System ---
+
+# 5. VaultConnection for envoy-gateway-system
+resource "kubernetes_manifest" "vault_connection_eg" {
+  manifest = {
+    apiVersion = "secrets.hashicorp.com/v1beta1"
+    kind       = "VaultConnection"
+    metadata = {
+      name      = "default"
+      namespace = "envoy-gateway-system"
+    }
+    spec = {
+      address = "http://vault.default.svc:8200"
+    }
+  }
+}
+
+# 6. VaultAuth for envoy-gateway-system
+resource "kubernetes_manifest" "vault_auth_eg" {
+  manifest = {
+    apiVersion = "secrets.hashicorp.com/v1beta1"
+    kind       = "VaultAuth"
+    metadata = {
+      name      = "default"
+      namespace = "envoy-gateway-system"
+    }
+    spec = {
+      method = "kubernetes"
+      mount  = vault_auth_backend.kubernetes.path
+      kubernetes = {
+        role           = vault_kubernetes_auth_backend_role.vso_role.role_name
+        serviceAccount = "default"
+      }
+      vaultConnectionRef = "default"
+    }
+  }
+}
+
+# 7. VaultPKISecret for Envoy in envoy-gateway-system
+resource "kubernetes_manifest" "vault_pki_secret_eg" {
+  manifest = {
+    apiVersion = "secrets.hashicorp.com/v1beta1"
+    kind       = "VaultPKISecret"
+    metadata = {
+      name      = "flask-app-cert-envoy"
+      namespace = "envoy-gateway-system"
+    }
+    spec = {
+      vaultAuthRef = "default"
+      mount        = vault_mount.pki.path
+      role         = vault_pki_secret_backend_role.role.name
+      commonName   = "flask-app.default.svc"
+      format       = "pem"
+      destination = {
+        create = true
+        name   = "flask-app-tls"
+        type   = "kubernetes.io/tls"
+      }
+      rolloutRestartTargets = local.envoy_deploy_name != "" ? [
+        {
+          kind = "Deployment"
+          name = local.envoy_deploy_name
+        }
+      ] : []
+    }
+  }
+}
+
+# 8. ReferenceGrant to allow Gateway (in default) to read Secret (in envoy-gateway-system)
+resource "kubernetes_manifest" "reference_grant" {
+  manifest = {
+    apiVersion = "gateway.networking.k8s.io/v1beta1"
+    kind       = "ReferenceGrant"
+    metadata = {
+      name      = "allow-gateway-secret-read"
+      namespace = "envoy-gateway-system"
+    }
+    spec = {
+      from = [
+        {
+          group     = "gateway.networking.k8s.io"
+          kind      = "Gateway"
+          namespace = "default"
+        }
+      ]
+      to = [
+        {
+          group = ""
+          kind  = "Secret"
+          name  = "flask-app-tls"
         }
       ]
     }

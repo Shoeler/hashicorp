@@ -269,12 +269,20 @@ resource "kubernetes_manifest" "vault_pki_secret_eg" {
         name   = "flask-app-tls"
         type   = "kubernetes.io/tls"
       }
-      rolloutRestartTargets = local.envoy_deploy_name != "" ? [
-        {
-          kind = "Deployment"
-          name = local.envoy_deploy_name
-        }
-      ] : []
+      rolloutRestartTargets = concat(
+        [
+          {
+            kind = "Deployment"
+            name = "envoy-gateway"
+          }
+        ],
+        local.envoy_deploy_name != "" ? [
+          {
+            kind = "Deployment"
+            name = local.envoy_deploy_name
+          }
+        ] : []
+      )
     }
   }
 }

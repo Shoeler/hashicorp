@@ -262,6 +262,3 @@ echo "   (Wait up to 10s for VSO to sync, then check http://localhost/secret aga
 echo ""
 echo "To see the status of the synced k8s certificate:"
 echo "    kubectl describe VaultPKISecret flask-app-cert"
-echo ""
-echo "To see the serial number of the issued certificate:"
-echo "    kubectl exec -it <flask-app-pod-name> -- openssl x509 -in /tls/tls.crt -noout -serial"

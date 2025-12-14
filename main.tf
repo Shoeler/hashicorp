@@ -103,6 +103,138 @@ output "envoy_deployment_name" {
   value = local.envoy_deploy_name
 }
 
+# --- Envoy Restarter Infrastructure ---
+
+# Service Account for the restarter
+resource "kubernetes_service_account" "envoy_restarter" {
+  metadata {
+    name      = "envoy-restarter"
+    namespace = "envoy-gateway-system"
+  }
+}
+
+# Role to allow restarting deployments in envoy-gateway-system
+resource "kubernetes_role" "envoy_restarter_role" {
+  metadata {
+    name      = "envoy-restarter-role"
+    namespace = "envoy-gateway-system"
+  }
+
+  rule {
+    api_groups = ["apps", "extensions"]
+    resources  = ["deployments"]
+    verbs      = ["get", "list", "patch"]
+  }
+
+  rule {
+    api_groups = [""]
+    resources  = ["secrets"]
+    verbs      = ["get", "list", "watch"]
+  }
+}
+
+# Bind the Role to the Service Account
+resource "kubernetes_role_binding" "envoy_restarter_binding" {
+  metadata {
+    name      = "envoy-restarter-binding"
+    namespace = "envoy-gateway-system"
+  }
+
+  role_ref {
+    api_group = "rbac.authorization.k8s.io"
+    kind      = "Role"
+    name      = kubernetes_role.envoy_restarter_role.metadata[0].name
+  }
+
+  subject {
+    kind      = "ServiceAccount"
+    name      = kubernetes_service_account.envoy_restarter.metadata[0].name
+    namespace = "envoy-gateway-system"
+  }
+}
+
+# Deployment that runs kubectl to restart envoy
+resource "kubernetes_deployment" "envoy_restarter" {
+  metadata {
+    name      = "envoy-restarter"
+    namespace = "envoy-gateway-system"
+  }
+
+  spec {
+    replicas = 1
+
+    selector {
+      match_labels = {
+        app = "envoy-restarter"
+      }
+    }
+
+    template {
+      metadata {
+        labels = {
+          app = "envoy-restarter"
+        }
+      }
+
+      spec {
+        service_account_name = kubernetes_service_account.envoy_restarter.metadata[0].name
+        container {
+          name  = "restarter"
+          image = "bitnami/kubectl:latest"
+          command = ["/bin/sh", "-c"]
+          args = [
+            <<EOT
+restart_envoy() {
+  echo "$(date): Triggering Envoy Restart..."
+  kubectl rollout restart -n envoy-gateway-system deployment/envoy-gateway || echo "Failed to restart controller."
+  if [ -n "$ENVOY_DEPLOY_NAME" ]; then
+    echo "Restarting Proxy Deployment: $ENVOY_DEPLOY_NAME"
+    kubectl rollout restart -n envoy-gateway-system deployment/$ENVOY_DEPLOY_NAME || echo "Failed to restart proxy."
+  else
+    echo "Warning: ENVOY_DEPLOY_NAME is empty."
+  fi
+}
+
+# 1. Immediate restart on pod startup (covers VSO rotation)
+restart_envoy
+
+# 2. Watch loop for manual secret changes (deletion/restoration)
+echo "Starting Secret Watch Loop..."
+LAST_RV=$(kubectl get secret flask-app-tls -n envoy-gateway-system -o jsonpath='{.metadata.resourceVersion}' 2>/dev/null)
+
+while true; do
+  sleep 5
+  CURRENT_RV=$(kubectl get secret flask-app-tls -n envoy-gateway-system -o jsonpath='{.metadata.resourceVersion}' 2>/dev/null)
+
+  # Handle case where secret was missing and came back, or changed
+  if [ -n "$CURRENT_RV" ] && [ "$CURRENT_RV" != "$LAST_RV" ]; then
+    if [ -n "$LAST_RV" ]; then
+       echo "Secret changed (RV: $LAST_RV -> $CURRENT_RV). Restarting..."
+       restart_envoy
+    else
+       # If LAST_RV was empty (secret missing), and now it exists, that's a restore.
+       echo "Secret appeared/restored (RV: $CURRENT_RV). Restarting..."
+       restart_envoy
+    fi
+    LAST_RV="$CURRENT_RV"
+  elif [ -z "$CURRENT_RV" ]; then
+    # Secret missing
+    LAST_RV=""
+  fi
+done
+EOT
+          ]
+
+          env {
+            name  = "ENVOY_DEPLOY_NAME"
+            value = local.envoy_deploy_name
+          }
+        }
+      }
+    }
+  }
+}
+
 # --- Vault Secrets Operator CRDs ---
 
 # 1. VaultConnection
@@ -228,20 +360,12 @@ resource "kubernetes_manifest" "vault_pki_secret_eg" {
         name   = "flask-app-tls"
         type   = "kubernetes.io/tls"
       }
-      rolloutRestartTargets = concat(
-        [
-          {
-            kind = "Deployment"
-            name = "envoy-gateway"
-          }
-        ],
-        local.envoy_deploy_name != "" ? [
-          {
-            kind = "Deployment"
-            name = local.envoy_deploy_name
-          }
-        ] : []
-      )
+      rolloutRestartTargets = [
+        {
+          kind = "Deployment"
+          name = "envoy-restarter"
+        }
+      ]
     }
   }
 }

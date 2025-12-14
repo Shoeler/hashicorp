@@ -172,12 +172,9 @@ EOF
   # 6.5. Enable HTTPS on Gateway
   # Now that Terraform has run, the flask-app-tls secret should exist (or be creating).
   # We can now add the HTTPS listener to the Gateway.
-  # To ensure the EnvoyProxy configuration (specifically NodePort 30443) is picked up correctly,
-  # we recreate the Gateway with both listeners defined.
 
-  echo -e "${GREEN}Recreating Gateway to include HTTPS listener...${NC}"
-  kubectl delete gateway eg -n default
-
+  echo -e "${GREEN}Updating Gateway to include HTTPS listener...${NC}"
+  # We apply the update instead of delete/recreate to minimize downtime, but we must ensure the data plane updates.
   cat <<EOF | kubectl apply -f -
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
@@ -199,15 +196,25 @@ spec:
       - name: flask-app-tls
 EOF
 
-  # Wait for the Envoy Proxy Service to be recreated/updated
-  echo "Waiting for Envoy Proxy Service..."
-  sleep 10
+  # Wait for the Envoy Proxy Deployment to be ready (Data Plane)
+  echo "Waiting for Envoy Proxy Deployment to be ready..."
+  # The deployment name typically matches the service name found via label
+  # But we can find it by label directly.
+  kubectl wait --namespace envoy-gateway-system \
+    --for=condition=available deployment \
+    -l gateway.envoyproxy.io/owning-gateway-name=eg \
+    --timeout=120s
+
   EG_SVC=$(kubectl get svc -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}' -n envoy-gateway-system)
   echo "Envoy Service: $EG_SVC"
 
-  # Ensure NodePort 30443 is set for HTTPS (since EnvoyProxy ports config is not supported)
-  echo "Patching Envoy Service $EG_SVC to NodePort 30443..."
-  kubectl patch svc $EG_SVC -p='{"spec": {"ports": [{"port": 443, "nodePort": 30443}]}}' -n envoy-gateway-system
+  # Ensure NodePorts 30080 (HTTP) and 30443 (HTTPS) are set
+  # The update might have reset ports or added the new one without NodePort.
+  echo "Patching Envoy Service $EG_SVC to enforce NodePorts 30080 and 30443..."
+  kubectl patch svc $EG_SVC --type='json' -p='[
+    {"op": "replace", "path": "/spec/ports/0/nodePort", "value": 30080},
+    {"op": "replace", "path": "/spec/ports/1/nodePort", "value": 30443}
+  ]' -n envoy-gateway-system
 fi
 
 # 6. Verification

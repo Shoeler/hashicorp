@@ -50,7 +50,9 @@ if [ "$REDEPLOY_ONLY" == "false" ]; then
     --for=condition=available deployment/envoy-gateway \
     --timeout=90s
 
-  # Create EnvoyProxy config for static NodePorts
+  # Create EnvoyProxy config (to set LoadBalancer type)
+  # Note: Specifying 'ports'/NodePorts directly in EnvoyProxy is not supported in this version,
+  # so we still need to patch the Service for static NodePorts.
   echo -e "${GREEN}Creating EnvoyProxy configuration...${NC}"
   cat <<EOF | kubectl apply -f -
 apiVersion: gateway.envoyproxy.io/v1alpha1
@@ -64,17 +66,6 @@ spec:
     kubernetes:
       envoyService:
         type: LoadBalancer
-        ports:
-        - name: https
-          port: 443
-          protocol: TCP
-          servicePort: 443
-          nodePort: 30443
-        - name: http
-          port: 80
-          protocol: TCP
-          servicePort: 80
-          nodePort: 30080
 EOF
 
   # Create Gateway Class and Gateway
@@ -105,6 +96,7 @@ spec:
     port: 80
 EOF
 
+
   # Wait for the Envoy Proxy Service to be created by the Gateway
   echo "Waiting for Envoy Proxy Service..."
   # The service name is usually generated based on the Gateway name.
@@ -112,9 +104,11 @@ EOF
   EG_SVC=$(kubectl get svc -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}' -n envoy-gateway-system)
 
   echo "Envoy Service Created: $EG_SVC"
+  echo "Patching Envoy Service $EG_SVC to NodePort 30080..."
+  # Note: The service type is set to LoadBalancer by EnvoyProxy config, but we need to force the NodePort.
+  kubectl patch svc $EG_SVC --type='json' -p='[{"op": "replace", "path": "/spec/ports/0/nodePort", "value": 30080}]' -n envoy-gateway-system
 
   # Create HTTPRoute for Vault
-  echo -e "${GREEN}Creating HTTPRoute for Vault...${NC}"
   cat <<EOF | kubectl apply -f -
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -210,6 +204,10 @@ EOF
   sleep 10
   EG_SVC=$(kubectl get svc -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}' -n envoy-gateway-system)
   echo "Envoy Service: $EG_SVC"
+
+  # Ensure NodePort 30443 is set for HTTPS (since EnvoyProxy ports config is not supported)
+  echo "Patching Envoy Service $EG_SVC to NodePort 30443..."
+  kubectl patch svc $EG_SVC -p='{"spec": {"ports": [{"port": 443, "nodePort": 30443}]}}' -n envoy-gateway-system
 fi
 
 # 6. Verification

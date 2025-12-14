@@ -46,23 +46,33 @@ This script will:
 ## Architecture
 
 *   **Vault**: Runs in `dev` mode with root token `root`. UI accessible via http://localhost/ui/
-*   **Vault Secrets Operator**: Authenticates to Vault using the Kubernetes Auth Method.
-*   **Gateway API and envoy**: Ingress from the local machine to the kind cluster. Terminates HTTPS traffic using certificates issued by Vault.
-*   **Helm**:
-    *    Deploys envoy via the default envoy helm chart
-    *    Deploys Vault via default HashiCorp helm chart
-    *    Deploys VSO via default HashiCorp helm chart
-    *    Deploys dogfood flask app after k8s cluster fully configured
-*   **Terraform**:
-    *   Configures the Kubernetes Auth Method in Vault.
-    *   Enables the PKI secrets engine in Vault and configures a role.
-    *   Creates a policy and role for VSO.
-    *   Creates a sample secret `secret/data/example`.
-    *   Deploys VSO CRDs:
-        *   `VaultConnection`, `VaultAuth`
-        *   `VaultStaticSecret`: Syncs the KV secret.
-        *   `VaultPKISecret`: Issues and syncs a TLS certificate.
-    *   Creates HTTP routes for the flask app and vault UI
+    *   **KV Engine**: Stores application configuration (username/password).
+    *   **PKI Engine**: Acts as an internal Certificate Authority to issue TLS certificates.
+*   **Vault Secrets Operator (VSO)**:
+    *   Authenticates to Vault using the Kubernetes Auth Method.
+    *   Syncs KV secrets to Kubernetes Secrets.
+    *   Issues and syncs PKI certificates to Kubernetes TLS Secrets.
+*   **Gateway API (Envoy Gateway)**:
+    *   Manages the ingress traffic from the local machine to the Kind cluster.
+    *   Terminates HTTPS traffic using the certificates synced by VSO.
+*   **Flask App**:
+    *   A simple Python application that reads secrets from the environment.
+    *   Exposed via the Gateway on `/secret`.
+*   **Infrastructure as Code**:
+    *   **Helm**: Deploys Vault, VSO, Envoy Gateway, and the application.
+    *   **Terraform**: Configures Vault internals (Auth methods, PKI engine/roles, KV secrets) and VSO resources (`VaultConnection`, `VaultAuth`, `VaultStaticSecret`, `VaultPKISecret`).
+
+## TLS Certificate Plumbing
+
+The following steps describe how the TLS certificate is generated and used to secure the application:
+
+1.  **Vault Configuration**: Terraform enables the PKI secret engine in Vault (`pki/`) and configures a role (`flask-app-role`) that allows issuing certificates for `flask-app.default.svc`.
+2.  **Certificate Request**: The `VaultPKISecret` custom resource (`flask-app-cert`) defines a request for a certificate from Vault using the `flask-app-role`.
+3.  **Secret Sync**: The Vault Secrets Operator (VSO) processes this request, communicates with Vault to issue the certificate and private key, and saves them into a Kubernetes Secret named `flask-app-tls` (type `kubernetes.io/tls`) in the `default` namespace.
+4.  **Gateway Configuration**: The `Gateway` resource (`eg`) is configured with an HTTPS listener on port 443. This listener explicitly references the `flask-app-tls` secret.
+5.  **TLS Termination**: The Envoy Proxy (data plane) loads the certificate from the `flask-app-tls` secret and uses it to terminate TLS connections from the client (browser/curl) before forwarding the decrypted traffic to the `flask-app` service.
+
+This architecture ensures that certificates are short-lived (managed by Vault) and automatically rotated by VSO (which updates the Kubernetes Secret), with the Gateway picking up the changes automatically.
 
 ## Manual Interaction
 

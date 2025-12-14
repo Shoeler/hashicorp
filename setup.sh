@@ -121,6 +121,21 @@ EOF
   echo -e "${GREEN}Initializing Terraform...${NC}"
   terraform init
 
+  # 5. Build and Deploy Flask App (Install first so Deployment exists for VSO)
+  echo -e "${GREEN}Building and deploying Flask App (Pre-Terraform)...${NC}"
+  podman build -t flask-app:latest ./flask-app
+  kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
+  # This has to run twice because it doesn't tag it properly the first time
+  kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
+
+  echo -e "${GREEN}Deploying Flask App Helm Chart...${NC}"
+  # We don't wait here because the secret doesn't exist yet, so it might not be ready
+  helm upgrade --install flask-app ./flask-app/chart
+
+  # 6. Run Terraform
+  echo -e "${GREEN}Initializing Terraform...${NC}"
+  terraform init
+
   # Import the 'secret' mount if it exists (Vault Dev Mode default)
   echo -e "${BLUE}Checking for existing secret mount...${NC}"
   if ! terraform state list | grep -q "vault_mount.kvv2"; then
@@ -131,7 +146,7 @@ EOF
   echo -e "${GREEN}Applying Terraform configuration...${NC}"
   terraform apply -auto-approve
 
-  # 5.5. Enable HTTPS on Gateway
+  # 6.5. Enable HTTPS on Gateway
   # Now that Terraform has run, the flask-app-tls secret should exist (or be creating).
   # We can now add the HTTPS listener to the Gateway.
 
@@ -212,19 +227,15 @@ else
   exit 1
 fi
 
-# 7. Build and Deploy Flask App
-echo -e "${GREEN}Building and deploying Flask App...${NC}"
-podman build -t flask-app:latest ./flask-app
-kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
-# This has to run twice because it doesn't tag it properly the first time
-kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
-# The second load was duplicated in original file, removing it
-# kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
-
-echo -e "${GREEN}Deploying Flask App Helm Chart...${NC}"
-helm upgrade --install flask-app ./flask-app/chart
-
 if [ "$REDEPLOY_ONLY" == "true" ]; then
+    echo -e "${GREEN}Building and deploying Flask App...${NC}"
+    podman build -t flask-app:latest ./flask-app
+    kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
+    kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
+
+    echo -e "${GREEN}Deploying Flask App Helm Chart...${NC}"
+    helm upgrade --install flask-app ./flask-app/chart
+
     echo "Restarting deployment to pick up new image..."
     kubectl rollout restart deployment/flask-app
     echo -e "${BLUE}Waiting for rollout to complete...${NC}"
@@ -282,3 +293,21 @@ echo "   (Wait up to 10s for VSO to sync, then check http://localhost/secret aga
 echo ""
 echo "To see the status of the synced k8s certificate:"
 echo "    kubectl describe VaultPKISecret flask-app-cert"
+
+echo ""
+echo "To see the serial number of the issued certificate presented by the Gateway:"
+echo "    echo | openssl s_client -showcerts -connect 127.0.0.1:443 2>/dev/null | openssl x509 -noout -serial"
+
+echo ""
+echo "To force a rotation of the TLS cert on the Gateway:"
+echo "    kubectl delete secret flask-app-tls"
+echo "    # Verify that the secret has been recreated:"
+echo "    kubectl get secret flask-app-tls"
+
+echo ""
+echo "Troubleshooting:"
+echo "If verification fails, check the status of the Vault resources:"
+echo "    kubectl get vaultstaticsecret example-secret -o yaml"
+echo "    kubectl get vaultpkisecret flask-app-cert -o yaml"
+echo ""
+echo "Note: 'VaultStaticSecret' may show a 'RolloutRestartTriggeredFailed' error initially if the deployment was not ready. This is typically harmless."

@@ -92,7 +92,7 @@ kubectl describe VaultPKISecret flask-app-cert
 
 To see the serial number of the issued certificate presented by the Gateway:
 ```bash
-echo | openssl s_client -showcerts -servername localhost -connect localhost:443 2>/dev/null | openssl x509 -noout -serial
+echo | openssl s_client -showcerts -connect 127.0.0.1:443 2>/dev/null | openssl x509 -noout -serial
 ```
 
 To force a rotation of the TLS cert on the Gateway:
@@ -106,12 +106,14 @@ To force a rotation of the TLS cert on the Gateway:
     ```
 3. Check the serial number again to confirm it has changed:
     ```bash
-    echo | openssl s_client -showcerts -servername localhost -connect localhost:443 2>/dev/null | openssl x509 -noout -serial
+    echo | openssl s_client -showcerts -connect 127.0.0.1:443 2>/dev/null | openssl x509 -noout -serial
     ```
 
 ## Troubleshooting
 
-If the script fails at the verification step, check the status of the `VaultStaticSecret` or `VaultPKISecret`:
+If the script fails at the verification step, check the status of the `VaultStaticSecret` or `VaultPKISecret`.
+
+**Note:** `VaultStaticSecret` may show a `RolloutRestartTriggeredFailed` error initially if the `flask-app` deployment was not ready when the secret was first synced. This is expected and should resolve automatically or can be ignored if the application is running correctly.
 
 ```bash
 kubectl get vaultstaticsecret example-secret -o yaml

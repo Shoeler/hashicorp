@@ -143,6 +143,11 @@ EOF
     -l gateway.envoyproxy.io/owning-gateway-name=eg \
     --timeout=120s
 
+  # Ensure the NodePort service endpoints are populated
+  echo "Waiting for Gateway NodePort endpoints..."
+  # We just sleep a bit to allow endpoints to propagate, a more robust check would be waiting for endpoints
+  sleep 5
+
   # Create HTTPRoute for Vault
   cat <<EOF | kubectl apply -f -
 apiVersion: gateway.networking.k8s.io/v1
@@ -193,6 +198,37 @@ EOF
   # 6. Run Terraform
   echo -e "${GREEN}Initializing Terraform...${NC}"
   terraform init
+
+  # Wait for Vault to be reachable via Gateway before applying Terraform
+  echo -e "${BLUE}Waiting for Vault to be reachable via Gateway...${NC}"
+  RETRIES=30
+  SLEEP=5
+  VAULT_READY=false
+  for ((i=1; i<=RETRIES; i++)); do
+    # Check Vault health or just root path. 503/500 is fine (means reachable), connection reset/refused is not.
+    # We use -o /dev/null -w "%{http_code}" to check status.
+    # Vault unseal status check: /v1/sys/health
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:80/v1/sys/health || echo "000")
+
+    # 200 = initialized, unsealed, active
+    # 429 = standby
+    # 472 = disaster recovery mode
+    # 473 = performance standby
+    # 501 = not initialized
+    # 503 = sealed
+    if [[ "$HTTP_CODE" =~ ^(200|429|472|473|501|503)$ ]]; then
+      echo "Vault is reachable (HTTP $HTTP_CODE)."
+      VAULT_READY=true
+      break
+    fi
+    echo "Attempt $i/$RETRIES: Vault not reachable (HTTP $HTTP_CODE)..."
+    sleep $SLEEP
+  done
+
+  if [ "$VAULT_READY" = false ]; then
+      echo -e "\033[0;31mError: Vault is not reachable via Gateway. Cannot proceed with Terraform.\033[0m"
+      exit 1
+  fi
 
   # Import the 'secret' mount if it exists (Vault Dev Mode default)
   echo -e "${BLUE}Checking for existing secret mount...${NC}"

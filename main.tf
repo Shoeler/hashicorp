@@ -97,22 +97,10 @@ data "kubernetes_resources" "envoy_deployment" {
 
 locals {
   envoy_deploy_name = try(data.kubernetes_resources.envoy_deployment.objects[0].metadata[0].name, "")
+}
 
-  rollout_targets = concat(
-    [
-      {
-        kind = "Deployment"
-        name = "flask-app"
-      }
-    ],
-    local.envoy_deploy_name != "" ? [
-      {
-        kind      = "Deployment"
-        name      = local.envoy_deploy_name
-        namespace = "envoy-gateway-system"
-      }
-    ] : []
-  )
+output "envoy_deployment_name" {
+  value = local.envoy_deploy_name
 }
 
 # --- Vault Secrets Operator CRDs ---
@@ -130,10 +118,6 @@ resource "kubernetes_manifest" "vault_connection" {
       address = "http://vault.default.svc:8200"
     }
   }
-}
-
-output "envoy_deployment_name" {
-  value = local.envoy_deploy_name
 }
 
 # 2. VaultAuth
@@ -176,31 +160,6 @@ resource "kubernetes_manifest" "vault_static_secret" {
       }
       vaultAuthRef = "default"
       refreshAfter = "10s"
-      rolloutRestartTargets = local.rollout_targets
-    }
-  }
-}
-
-# 4. VaultPKISecret (for Flask App in default namespace)
-resource "kubernetes_manifest" "vault_pki_secret" {
-  manifest = {
-    apiVersion = "secrets.hashicorp.com/v1beta1"
-    kind       = "VaultPKISecret"
-    metadata = {
-      name      = "flask-app-cert"
-      namespace = "default"
-    }
-    spec = {
-      vaultAuthRef = "default"
-      mount        = vault_mount.pki.path
-      role         = vault_pki_secret_backend_role.role.name
-      commonName   = "flask-app.default.svc"
-      format       = "pem"
-      destination = {
-        create = true
-        name   = "flask-app-tls"
-        type   = "kubernetes.io/tls"
-      }
       rolloutRestartTargets = [
         {
           kind = "Deployment"

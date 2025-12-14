@@ -190,7 +190,6 @@ FOUND=false
 
 for ((i=1; i<=RETRIES; i++)); do
   if kubectl get secret k8s-secret-from-vault >/dev/null 2>&1 && \
-     kubectl get secret flask-app-tls >/dev/null 2>&1 && \
      kubectl get secret flask-app-tls -n envoy-gateway-system >/dev/null 2>&1; then
     FOUND=true
     break
@@ -200,7 +199,7 @@ for ((i=1; i<=RETRIES; i++)); do
 done
 
 if [ "$FOUND" = true ]; then
-  echo -e "${GREEN}Success! Secrets 'k8s-secret-from-vault' and 'flask-app-tls' found.${NC}"
+  echo -e "${GREEN}Success! Secrets 'k8s-secret-from-vault' and 'flask-app-tls' (in envoy-gateway-system) found.${NC}"
   echo "Content:"
   kubectl get secret k8s-secret-from-vault -o jsonpath='{.data.username}' | base64 --decode
   echo ""
@@ -221,10 +220,6 @@ echo "Verifying Envoy Deployment target in VaultPKISecret..."
 TARGETS=$(kubectl get vaultpkisecret flask-app-cert-envoy -n envoy-gateway-system -o jsonpath='{.spec.rolloutRestartTargets}')
 if [ -z "$TARGETS" ] || [ "$TARGETS" == "[]" ]; then
     echo -e "\033[0;31mWarning: No rolloutRestartTargets found in flask-app-cert-envoy. Envoy restart may not work.\033[0m"
-    echo "Found Envoy Deployment Name from Terraform output:"
-    terraform output envoy_deployment_name || echo "Terraform output not available."
-    echo "Available deployments in envoy-gateway-system:"
-    kubectl get deploy -n envoy-gateway-system --show-labels
 else
     echo -e "${GREEN}Rollout targets configured: $TARGETS${NC}"
 fi

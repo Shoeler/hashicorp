@@ -50,6 +50,33 @@ if [ "$REDEPLOY_ONLY" == "false" ]; then
     --for=condition=available deployment/envoy-gateway \
     --timeout=90s
 
+  # Create EnvoyProxy config for static NodePorts
+  echo -e "${GREEN}Creating EnvoyProxy configuration...${NC}"
+  cat <<EOF | kubectl apply -f -
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: static-nodeport-config
+  namespace: envoy-gateway-system
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: NodePort
+        ports:
+        - name: https
+          port: 443
+          protocol: TCP
+          servicePort: 443
+          nodePort: 30443
+        - name: http
+          port: 80
+          protocol: TCP
+          servicePort: 80
+          nodePort: 30080
+EOF
+
   # Create Gateway Class and Gateway
   echo -e "${GREEN}Creating Gateway resource...${NC}"
   cat <<EOF | kubectl apply -f -
@@ -59,6 +86,11 @@ metadata:
   name: eg
 spec:
   controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: static-nodeport-config
+    namespace: envoy-gateway-system
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
@@ -76,13 +108,10 @@ EOF
   # Wait for the Envoy Proxy Service to be created by the Gateway
   echo "Waiting for Envoy Proxy Service..."
   # The service name is usually generated based on the Gateway name.
-  # For Envoy Gateway, it follows a pattern like envoy-<gateway-name>-<random> or similar,
-  # but usually it's deterministic or we can find it via label selector.
   sleep 10
   EG_SVC=$(kubectl get svc -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}' -n envoy-gateway-system)
 
-  echo "Patching Envoy Service $EG_SVC to NodePort 30080..."
-  kubectl patch svc $EG_SVC --type='json' -p='[{"op": "replace", "path": "/spec/type", "value": "NodePort"}, {"op": "replace", "path": "/spec/ports/0/nodePort", "value": 30080}]' -n envoy-gateway-system
+  echo "Envoy Service Created: $EG_SVC"
 
   # Create HTTPRoute for Vault
   echo -e "${GREEN}Creating HTTPRoute for Vault...${NC}"
@@ -189,9 +218,7 @@ EOF
     exit 1
   fi
 
-  echo "Patching Envoy Service $EG_SVC to NodePort 30443..."
-  # Use strategic merge patch to update port 443 without affecting port 80
-  kubectl patch svc $EG_SVC -p='{"spec": {"ports": [{"port": 443, "nodePort": 30443}]}}' -n envoy-gateway-system
+  # Note: No need to patch NodePort 30443 explicitly; EnvoyProxy configuration handles it.
 fi
 
 # 6. Verification

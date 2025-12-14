@@ -236,14 +236,34 @@ kubectl wait --for=condition=available --timeout=60s deployment/flask-app
 
 echo -e "${GREEN}Verifying Flask App...${NC}"
 echo "Calling /secret endpoint via HTTP..."
-# We can access via localhost/secret now
-curl -s http://localhost/secret | jq
 
-echo "Calling https://localhost/secret endpoint via HTTPS..."
-curl -sk https://localhost/secret | jq
+# Wait for the app to be reachable via Gateway
+RETRIES=20
+SLEEP=3
+SUCCESS=false
 
-echo "Calling https://localhost/secret endpoint..."
-curl -sk https://localhost/secret | jq
+for ((i=1; i<=RETRIES; i++)); do
+  # Check if endpoint returns 200 OK
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/secret)
+  if [ "$HTTP_CODE" == "200" ]; then
+    SUCCESS=true
+    break
+  fi
+  echo "Attempt $i/$RETRIES: Got HTTP $HTTP_CODE. Waiting for Gateway route..."
+  sleep $SLEEP
+done
+
+if [ "$SUCCESS" = true ]; then
+  # We can access via localhost/secret now
+  curl -s http://localhost/secret | jq
+
+  echo "Calling https://localhost/secret endpoint via HTTPS..."
+  curl -sk https://localhost/secret | jq
+else
+  echo -e "\033[0;31mError: Failed to reach /secret endpoint via Gateway.\033[0m"
+  curl -v http://localhost/secret
+  exit 1
+fi
 
 echo -e "${GREEN}Setup complete!${NC}"
 echo "You can interact with the cluster using: kubectl --context kind-${CLUSTER_NAME}"

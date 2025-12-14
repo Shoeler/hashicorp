@@ -119,3 +119,15 @@ If the script fails at the verification step, check the status of the `VaultStat
 kubectl get vaultstaticsecret example-secret -o yaml
 kubectl get vaultpkisecret flask-app-cert -o yaml
 ```
+
+If the HTTPS gateway is not reachable, check the Gateway and HTTPRoute status:
+
+```bash
+kubectl get gateway eg -n default -o yaml
+kubectl get httproute vault -n default -o yaml
+```
+
+You can also check the Envoy Gateway logs:
+```bash
+kubectl logs -n envoy-gateway-system -l control-plane=envoy-gateway
+```

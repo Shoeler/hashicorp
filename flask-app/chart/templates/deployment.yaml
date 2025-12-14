@@ -31,12 +31,3 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secret.name }}
                   key: password
-          volumeMounts:
-            - name: certs
-              mountPath: /etc/certs
-              readOnly: true
-      volumes:
-        - name: certs
-          secret:
-            secretName: flask-app-tls
-            optional: true

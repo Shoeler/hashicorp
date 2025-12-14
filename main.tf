@@ -174,12 +174,6 @@ resource "kubernetes_manifest" "vault_pki_secret" {
         name   = "flask-app-tls"
         type   = "kubernetes.io/tls"
       }
-      rolloutRestartTargets = [
-        {
-          kind = "Deployment"
-          name = "flask-app"
-        }
-      ]
     }
   }
 }

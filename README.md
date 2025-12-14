@@ -73,12 +73,6 @@ After the script completes:
 *   **Test APP (HTTP)**: http://localhost/secret
 *   **Test APP (HTTPS)**: https://localhost/secret
 
-To force a rotation of the TLS cert:
-
-```bash
-kubectl delete secret flask-app-tls
-```
-
 To see the synced secret:
 
 username:
@@ -96,10 +90,24 @@ To see the status of the synced k8s certificate:
 kubectl describe VaultPKISecret flask-app-cert
 ```
 
-To see the serial number of the issued certificate (from inside the app):
+To see the serial number of the issued certificate presented by the Gateway:
 ```bash
-kubectl exec -it <flask-app-pod-name> -- openssl x509 -in /etc/certs/tls.crt -noout -serial
+echo | openssl s_client -showcerts -servername localhost -connect localhost:443 2>/dev/null | openssl x509 -noout -serial
 ```
+
+To force a rotation of the TLS cert on the Gateway:
+1. Delete the generated Kubernetes secret. VSO will detect this and immediately request a new certificate from Vault.
+    ```bash
+    kubectl delete secret flask-app-tls
+    ```
+2. Verify that the secret has been recreated (the age should be very recent):
+    ```bash
+    kubectl get secret flask-app-tls
+    ```
+3. Check the serial number again to confirm it has changed:
+    ```bash
+    echo | openssl s_client -showcerts -servername localhost -connect localhost:443 2>/dev/null | openssl x509 -noout -serial
+    ```
 
 ## Troubleshooting
 

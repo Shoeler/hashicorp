@@ -290,9 +290,29 @@ EOF
   EG_SVC=$(kubectl get svc -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}' -n envoy-gateway-system)
   echo "Envoy Service: $EG_SVC"
 
-  # Update the stable NodePort Service with the correct HTTPS target port if it changed
-  HTTPS_TARGET=$(kubectl get svc "$EG_SVC" -n envoy-gateway-system -o jsonpath='{.spec.ports[?(@.name=="https")].targetPort}' 2>/dev/null)
-  [ -z "$HTTPS_TARGET" ] && HTTPS_TARGET=$(kubectl get svc "$EG_SVC" -n envoy-gateway-system -o jsonpath='{.spec.ports[?(@.port==443)].targetPort}' 2>/dev/null)
+  # Wait for the managed Service to be updated with the HTTPS port by the Gateway Controller
+  echo "Waiting for HTTPS port to appear on managed Envoy Service..."
+  RETRIES=30
+  SLEEP=2
+  HTTPS_TARGET=""
+
+  for ((i=1; i<=RETRIES; i++)); do
+    HTTPS_TARGET=$(kubectl get svc "$EG_SVC" -n envoy-gateway-system -o jsonpath='{.spec.ports[?(@.name=="https")].targetPort}' 2>/dev/null)
+    [ -z "$HTTPS_TARGET" ] && HTTPS_TARGET=$(kubectl get svc "$EG_SVC" -n envoy-gateway-system -o jsonpath='{.spec.ports[?(@.port==443)].targetPort}' 2>/dev/null)
+
+    if [ -n "$HTTPS_TARGET" ]; then
+      echo "Found HTTPS TargetPort: $HTTPS_TARGET"
+      break
+    fi
+    echo "Attempt $i/$RETRIES: HTTPS port not ready on managed service..."
+    sleep $SLEEP
+  done
+
+  # Fallback only if absolutely necessary, but warn
+  if [ -z "$HTTPS_TARGET" ]; then
+    echo "Warning: Could not detect HTTPS target port. Defaulting to 443."
+    HTTPS_TARGET=443
+  fi
 
   if [ -n "$HTTPS_TARGET" ]; then
     echo "Updating stable NodePort Service with HTTPS target port: $HTTPS_TARGET"
@@ -398,10 +418,13 @@ if [ "$SUCCESS" = true ]; then
   curl -s http://localhost/secret | jq
 
   echo "Calling https://localhost/secret endpoint via HTTPS..."
-  curl -sk https://localhost/secret | jq
+curl -v -sk https://localhost/secret | jq
 else
   echo -e "\033[0;31mError: Failed to reach /secret endpoint via Gateway.\033[0m"
   curl -v http://localhost/secret
+
+  echo "Checking Gateway Status:"
+  kubectl get gateway eg -n default -o yaml
   exit 1
 fi
 

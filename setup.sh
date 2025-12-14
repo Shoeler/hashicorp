@@ -50,9 +50,10 @@ if [ "$REDEPLOY_ONLY" == "false" ]; then
     --for=condition=available deployment/envoy-gateway \
     --timeout=90s
 
-  # Create EnvoyProxy config (to set ClusterIP type)
-  # We will create a separate NodePort service to ensure stable access ports (30080, 30443)
-  # regardless of Envoy Gateway reconciliation logic.
+  # Create EnvoyProxy config (to set LoadBalancer type)
+  # We use LoadBalancer to ensure Envoy is configured with standard external-facing ports,
+  # but we will create a separate stable NodePort service for local access to avoid
+  # port fluctuation during reconciliation.
   echo -e "${GREEN}Creating EnvoyProxy configuration...${NC}"
   cat <<EOF | kubectl apply -f -
 apiVersion: gateway.envoyproxy.io/v1alpha1
@@ -65,7 +66,7 @@ spec:
     type: Kubernetes
     kubernetes:
       envoyService:
-        type: ClusterIP
+        type: LoadBalancer
 EOF
 
   # Create Gateway Class and Gateway
@@ -105,12 +106,22 @@ EOF
 
   echo "Envoy Service Created: $EG_SVC"
 
+  # Dynamically determine targetPorts from the managed service
+  # This ensures we map to the correct container ports (e.g. 10080 vs 80)
+  HTTP_TARGET=$(kubectl get svc "$EG_SVC" -n envoy-gateway-system -o jsonpath='{.spec.ports[?(@.name=="http")].targetPort}')
+  [ -z "$HTTP_TARGET" ] && HTTP_TARGET=$(kubectl get svc "$EG_SVC" -n envoy-gateway-system -o jsonpath='{.spec.ports[?(@.port==80)].targetPort}')
+  [ -z "$HTTP_TARGET" ] && HTTP_TARGET=80 # Fallback
+
+  # For HTTPS, it might not be present yet if listener is not added, but standard is often 443 or 10443.
+  # If the service doesn't have it, we default to https named port if possible, or try 443.
+  HTTPS_TARGET=$(kubectl get svc "$EG_SVC" -n envoy-gateway-system -o jsonpath='{.spec.ports[?(@.name=="https")].targetPort}' 2>/dev/null)
+  [ -z "$HTTPS_TARGET" ] && HTTPS_TARGET=$(kubectl get svc "$EG_SVC" -n envoy-gateway-system -o jsonpath='{.spec.ports[?(@.port==443)].targetPort}' 2>/dev/null)
+  [ -z "$HTTPS_TARGET" ] && HTTPS_TARGET=443 # Fallback
+
+  echo "Detected TargetPorts - HTTP: $HTTP_TARGET, HTTPS: $HTTPS_TARGET"
+
   # Create a stable NodePort Service for access
   echo -e "${GREEN}Creating stable NodePort Service for Gateway...${NC}"
-  # Note: targetPort must match what Envoy Gateway configures in the pod (typically 80/443 for root, or 10080/10443 for non-root).
-  # We will attempt to dynamically determine targetPort if possible, or default to 80/443 since EG usually uses that or named ports.
-  # Using named port 'http' is safer if available.
-
   cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: Service
@@ -125,12 +136,12 @@ spec:
   ports:
   - name: http
     port: 80
-    targetPort: http
+    targetPort: $HTTP_TARGET
     nodePort: 30080
     protocol: TCP
   - name: https
     port: 443
-    targetPort: https
+    targetPort: $HTTPS_TARGET
     nodePort: 30443
     protocol: TCP
 EOF
@@ -279,8 +290,37 @@ EOF
   EG_SVC=$(kubectl get svc -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}' -n envoy-gateway-system)
   echo "Envoy Service: $EG_SVC"
 
-  # Note: The stable NodePort Service 'gateway-nodeports' already includes the HTTPS port config,
-  # so no need to update it here.
+  # Update the stable NodePort Service with the correct HTTPS target port if it changed
+  HTTPS_TARGET=$(kubectl get svc "$EG_SVC" -n envoy-gateway-system -o jsonpath='{.spec.ports[?(@.name=="https")].targetPort}' 2>/dev/null)
+  [ -z "$HTTPS_TARGET" ] && HTTPS_TARGET=$(kubectl get svc "$EG_SVC" -n envoy-gateway-system -o jsonpath='{.spec.ports[?(@.port==443)].targetPort}' 2>/dev/null)
+
+  if [ -n "$HTTPS_TARGET" ]; then
+    echo "Updating stable NodePort Service with HTTPS target port: $HTTPS_TARGET"
+    # We re-apply the service with the detected target port
+    cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway-nodeports
+  namespace: envoy-gateway-system
+spec:
+  type: NodePort
+  selector:
+    gateway.envoyproxy.io/owning-gateway-name: eg
+    gateway.envoyproxy.io/owning-gateway-namespace: default
+  ports:
+  - name: http
+    port: 80
+    targetPort: $HTTP_TARGET
+    nodePort: 30080
+    protocol: TCP
+  - name: https
+    port: 443
+    targetPort: $HTTPS_TARGET
+    nodePort: 30443
+    protocol: TCP
+EOF
+  fi
 fi
 
 # 6. Verification

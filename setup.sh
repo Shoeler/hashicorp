@@ -63,7 +63,7 @@ spec:
     type: Kubernetes
     kubernetes:
       envoyService:
-        type: NodePort
+        type: LoadBalancer
         ports:
         - name: https
           port: 443
@@ -178,47 +178,38 @@ EOF
   # 6.5. Enable HTTPS on Gateway
   # Now that Terraform has run, the flask-app-tls secret should exist (or be creating).
   # We can now add the HTTPS listener to the Gateway.
+  # To ensure the EnvoyProxy configuration (specifically NodePort 30443) is picked up correctly,
+  # we recreate the Gateway with both listeners defined.
 
-  echo -e "${GREEN}Updating Gateway to include HTTPS listener...${NC}"
-  kubectl patch gateway eg --type='json' -p='[
-    {"op": "add", "path": "/spec/listeners/-", "value": {
-      "name": "https",
-      "protocol": "HTTPS",
-      "port": 443,
-      "tls": {
-        "mode": "Terminate",
-        "certificateRefs": [{"name": "flask-app-tls"}]
-      }
-    }}
-  ]' -n default
+  echo -e "${GREEN}Recreating Gateway to include HTTPS listener...${NC}"
+  kubectl delete gateway eg -n default
 
-  # Wait for the Envoy Proxy Service to be updated with port 443
-  echo "Waiting for Envoy Proxy Service to add port 443..."
-  RETRIES=30
-  SLEEP=5
-  FOUND_PORT=false
+  cat <<EOF | kubectl apply -f -
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: eg
+  namespace: default
+spec:
+  gatewayClassName: eg
+  listeners:
+  - name: http
+    protocol: HTTP
+    port: 80
+  - name: https
+    protocol: HTTPS
+    port: 443
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - name: flask-app-tls
+EOF
 
+  # Wait for the Envoy Proxy Service to be recreated/updated
+  echo "Waiting for Envoy Proxy Service..."
+  sleep 10
   EG_SVC=$(kubectl get svc -l gateway.envoyproxy.io/owning-gateway-name=eg -o jsonpath='{.items[0].metadata.name}' -n envoy-gateway-system)
-
-  for ((i=1; i<=RETRIES; i++)); do
-    HAS_443=$(kubectl get svc "$EG_SVC" -n envoy-gateway-system -o jsonpath='{.spec.ports[?(@.port==443)].port}' 2>/dev/null)
-
-    if [ -n "$HAS_443" ]; then
-      echo "Service $EG_SVC has port 443."
-      FOUND_PORT=true
-      break
-    fi
-
-    echo "Attempt $i/$RETRIES: Port 443 not ready yet..."
-    sleep $SLEEP
-  done
-
-  if [ "$FOUND_PORT" = false ]; then
-    echo "Error: Port 443 failed to appear on Envoy Service."
-    exit 1
-  fi
-
-  # Note: No need to patch NodePort 30443 explicitly; EnvoyProxy configuration handles it.
+  echo "Envoy Service: $EG_SVC"
 fi
 
 # 6. Verification

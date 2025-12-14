@@ -21,8 +21,6 @@ def get_secret():
     return jsonify({
         "username": username,
         "password": password,
-        "certificate": "Certificate not loaded in app",
-        "serial_number": "N/A"
     })
 
 if __name__ == '__main__':

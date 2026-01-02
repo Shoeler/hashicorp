@@ -40,3 +40,5 @@ override.tf.json
 terraform.rc
 
 __pycache__/
+
+demo_steps.md

@@ -33,6 +33,21 @@ if [ "$REDEPLOY_ONLY" == "false" ]; then
   echo -e "${GREEN}Creating Kind cluster: ${CLUSTER_NAME}...${NC}"
   kind create cluster --name "${CLUSTER_NAME}" --config kind-config.yaml
 
+  # 2.5 Install Container Registry
+  echo -e "${GREEN}Installing Container Registry...${NC}"
+  helm repo add twuni https://helm.twun.io
+  helm repo update
+
+  # Install docker-registry using Helm
+  # NodePort 30500 mapped to host 5001 (via kind-config)
+  helm install registry twuni/docker-registry \
+    --version 2.2.1 \
+    --set service.type=NodePort \
+    --set service.nodePort=30500 \
+    --set service.port=5000 \
+    --set persistence.enabled=false \
+    --wait
+
   # 3. Install Envoy Gateway
   echo -e "${GREEN}Installing Gateway API CRDs and Envoy Gateway...${NC}"
   # Use podman to build/load images
@@ -197,14 +212,16 @@ EOF
 
   # 5. Build and Deploy Flask App (Install first so Deployment exists for VSO)
   echo -e "${GREEN}Building and deploying Flask App (Pre-Terraform)...${NC}"
-  podman build -t flask-app:latest ./flask-app
-  kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
-  # This has to run twice because it doesn't tag it properly the first time
-  kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
+  # Build and push to local registry
+  podman build -t localhost:5001/flask-app:latest ./flask-app
+  podman push localhost:5001/flask-app:latest --tls-verify=false
 
   echo -e "${GREEN}Deploying Flask App Helm Chart...${NC}"
   # We don't wait here because the secret doesn't exist yet, so it might not be ready
-  helm upgrade --install flask-app ./flask-app/chart
+  # Use the registry internal DNS name (registry-docker-registry) and port 5000
+  helm upgrade --install flask-app ./flask-app/chart \
+    --set image.repository=registry-docker-registry.default.svc.cluster.local:5000/flask-app \
+    --set image.pullPolicy=Always
 
   # 6. Run Terraform
   echo -e "${GREEN}Initializing Terraform...${NC}"
@@ -378,12 +395,13 @@ fi
 
 if [ "$REDEPLOY_ONLY" == "true" ]; then
     echo -e "${GREEN}Building and deploying Flask App...${NC}"
-    podman build -t flask-app:latest ./flask-app
-    kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
-    kind load docker-image flask-app:latest --name "${CLUSTER_NAME}"
+    podman build -t localhost:5001/flask-app:latest ./flask-app
+    podman push localhost:5001/flask-app:latest --tls-verify=false
 
     echo -e "${GREEN}Deploying Flask App Helm Chart...${NC}"
-    helm upgrade --install flask-app ./flask-app/chart
+    helm upgrade --install flask-app ./flask-app/chart \
+      --set image.repository=registry-docker-registry.default.svc.cluster.local:5000/flask-app \
+      --set image.pullPolicy=Always
 
     echo "Restarting deployment to pick up new image..."
     kubectl rollout restart deployment/flask-app

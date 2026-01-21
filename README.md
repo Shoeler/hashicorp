@@ -11,7 +11,7 @@ I have built this to run on my local M-series MacBook - so YMMV.
 Ensure you have the following tools preinstalled on your Mac:
 
 *   [Homebrew](https://brew.sh/)
-*   [Podman](https://podman.io) (`brew install podman && podman machine init && podman machine start`)
+*   [Podman](https://podman.io) (`brew install podman && podman machine init && podman machine set --rootful && podman machine start`)
 *   [Kind](https://kind.sigs.k8s.io/) (`brew install kind`)
 *   [Kubectl](https://kubernetes.io/docs/tasks/tools/) (`brew install kubectl`)
 *   [Helm](https://helm.sh/) (`brew install helm`)

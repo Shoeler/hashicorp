@@ -35,7 +35,7 @@ if [ "$REDEPLOY_ONLY" == "false" ]; then
 
   # 2.5 Install Container Registry
   echo -e "${GREEN}Installing Container Registry...${NC}"
-  helm repo add twuni https://helm.twun.io
+  helm repo add twuni https://twuni.github.io/docker-registry.helm/
   helm repo update
 
   # Install docker-registry using Helm

@@ -23,6 +23,15 @@ command -v kubectl >/dev/null 2>&1 || { echo >&2 "kubectl is required but not in
 command -v helm >/dev/null 2>&1 || { echo >&2 "helm is required but not installed. Aborting."; exit 1; }
 command -v terraform >/dev/null 2>&1 || { echo >&2 "terraform is required but not installed. Aborting."; exit 1; }
 
+# Check for Podman and configure Kind to use it
+if command -v podman >/dev/null 2>&1; then
+  echo -e "${BLUE}Podman detected. Configuring Kind to use podman...${NC}"
+  export KIND_EXPERIMENTAL_PROVIDER=podman
+else
+  # Only check for docker if podman is not found
+  command -v docker >/dev/null 2>&1 || { echo >&2 "neither podman nor docker found. Aborting."; exit 1; }
+fi
+
 if [ "$REDEPLOY_ONLY" == "false" ]; then
   # 2. Create Kind Cluster
   if kind get clusters | grep -q "^${CLUSTER_NAME}$"; then
@@ -31,6 +40,18 @@ if [ "$REDEPLOY_ONLY" == "false" ]; then
   fi
 
   echo -e "${GREEN}Creating Kind cluster: ${CLUSTER_NAME}...${NC}"
+
+  # Create registry config for containerd
+  echo -e "${GREEN}Generating registry configuration...${NC}"
+  rm -rf registry-config
+  mkdir -p registry-config/registry-docker-registry.default.svc.cluster.local:5000
+  cat <<EOF > registry-config/registry-docker-registry.default.svc.cluster.local:5000/hosts.toml
+server = "http://registry-docker-registry.default.svc.cluster.local:5000"
+
+[host."http://127.0.0.1:30500"]
+  capabilities = ["pull", "resolve"]
+EOF
+
   kind create cluster --name "${CLUSTER_NAME}" --config kind-config.yaml
 
   # 2.5 Install Container Registry
@@ -236,7 +257,7 @@ EOF
     # Check Vault health or just root path. 503/500 is fine (means reachable), connection reset/refused is not.
     # We use -o /dev/null -w "%{http_code}" to check status.
     # Vault unseal status check: /v1/sys/health
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:80/v1/sys/health || echo "000")
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/v1/sys/health || echo "000")
 
     # 200 = initialized, unsealed, active
     # 429 = standby
@@ -422,7 +443,7 @@ SUCCESS=false
 
 for ((i=1; i<=RETRIES; i++)); do
   # Check if endpoint returns 200 OK
-  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/secret)
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/secret)
   if [ "$HTTP_CODE" == "200" ]; then
     SUCCESS=true
     break
@@ -433,13 +454,13 @@ done
 
 if [ "$SUCCESS" = true ]; then
   # We can access via localhost/secret now
-  curl -s http://localhost/secret | jq
+  curl -s http://localhost:8080/secret | jq
 
   echo "Calling https://localhost/secret endpoint via HTTPS..."
-curl -v -sk https://localhost/secret | jq
+curl -v -sk https://localhost:8443/secret | jq
 else
   echo -e "\033[0;31mError: Failed to reach /secret endpoint via Gateway.\033[0m"
-  curl -v http://localhost/secret
+  curl -v http://localhost:8080/secret
 
   echo "Checking Gateway Status:"
   kubectl get gateway eg -n default -o yaml
@@ -448,8 +469,8 @@ fi
 
 echo -e "${GREEN}Setup complete!${NC}"
 echo "You can interact with the cluster using: kubectl --context kind-${CLUSTER_NAME}"
-echo "Vault UI is available at http://localhost/ui/ (Token: root)"
-echo "Flask App is available at http://localhost/secret or https://localhost/secret"
+echo "Vault UI is available at http://localhost:8080/ui/ (Token: root)"
+echo "Flask App is available at http://localhost:8080/secret or https://localhost:8443/secret"
 
 echo ""
 echo "To explore and modify secrets in Vault:"
@@ -459,14 +480,14 @@ echo ""
 echo "2. Inside the pod, update the secret (e.g., change username/password):"
 echo "   vault kv put secret/example username=newuser password=newpass"
 echo ""
-echo "   (Wait up to 10s for VSO to sync, then check http://localhost/secret again)"
+echo "   (Wait up to 10s for VSO to sync, then check http://localhost:8080/secret again)"
 echo ""
 echo "To see the status of the synced k8s certificate:"
 echo "    kubectl describe VaultPKISecret flask-app-cert"
 
 echo ""
 echo "To see the serial number of the issued certificate presented by the Gateway:"
-echo "    echo | openssl s_client -showcerts -connect 127.0.0.1:443 2>/dev/null | openssl x509 -noout -serial"
+echo "    echo | openssl s_client -showcerts -connect 127.0.0.1:8443 2>/dev/null | openssl x509 -noout -serial"
 
 echo ""
 echo "To force a rotation of the TLS cert on the Gateway:"

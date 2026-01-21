@@ -12,7 +12,7 @@ terraform {
 }
 
 provider "vault" {
-  address = "http://localhost:80"
+  address = "http://localhost:8080"
   token   = "root" # Dev mode root token
 }
 

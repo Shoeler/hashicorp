@@ -9,3 +9,10 @@ nodes:
   - containerPort: 30443
     hostPort: 443
     protocol: TCP
+  - containerPort: 30500
+    hostPort: 5001
+    protocol: TCP
+containerdConfigPatches:
+- |-
+  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."registry-docker-registry.default.svc.cluster.local:5000"]
+    endpoint = ["http://127.0.0.1:30500"]

@@ -14,5 +14,5 @@ nodes:
     protocol: TCP
 containerdConfigPatches:
 - |-
-  [plugins."io.containerd.grpc.v1.cri".registry.mirrors."registry-docker-registry.default.svc.cluster.local:5000"]
-    endpoint = ["http://127.0.0.1:30500"]
+  [plugins."io.containerd.grpc.v1.cri".registry.configs."registry-docker-registry.default.svc.cluster.local:5000".tls]
+    insecure_skip_verify = true

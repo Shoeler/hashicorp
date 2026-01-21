@@ -23,6 +23,15 @@ command -v kubectl >/dev/null 2>&1 || { echo >&2 "kubectl is required but not in
 command -v helm >/dev/null 2>&1 || { echo >&2 "helm is required but not installed. Aborting."; exit 1; }
 command -v terraform >/dev/null 2>&1 || { echo >&2 "terraform is required but not installed. Aborting."; exit 1; }
 
+# Check for Podman and configure Kind to use it
+if command -v podman >/dev/null 2>&1; then
+  echo -e "${BLUE}Podman detected. Configuring Kind to use podman...${NC}"
+  export KIND_EXPERIMENTAL_PROVIDER=podman
+else
+  # Only check for docker if podman is not found
+  command -v docker >/dev/null 2>&1 || { echo >&2 "neither podman nor docker found. Aborting."; exit 1; }
+fi
+
 if [ "$REDEPLOY_ONLY" == "false" ]; then
   # 2. Create Kind Cluster
   if kind get clusters | grep -q "^${CLUSTER_NAME}$"; then

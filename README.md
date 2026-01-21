@@ -45,7 +45,7 @@ This script will:
 
 ## Architecture
 
-*   **Vault**: Runs in `dev` mode with root token `root`. UI accessible via http://localhost/ui/
+*   **Vault**: Runs in `dev` mode with root token `root`. UI accessible via http://localhost:8080/ui/
     *   **KV Engine**: Stores application configuration (username/password).
     *   **PKI Engine**: Acts as an internal Certificate Authority to issue TLS certificates.
 *   **Vault Secrets Operator (VSO)**:
@@ -79,9 +79,9 @@ This architecture ensures that certificates are short-lived (managed by Vault) a
 After the script completes:
 
 *   **Kubernetes Context**:`kind-vault-demo`
-*   **Vault UI**: http://localhost/ui (Token: `root`) 
-*   **Test APP (HTTP)**: http://localhost/secret
-*   **Test APP (HTTPS)**: https://localhost/secret
+*   **Vault UI**: http://localhost:8080/ui (Token: `root`)
+*   **Test APP (HTTP)**: http://localhost:8080/secret
+*   **Test APP (HTTPS)**: https://localhost:8443/secret
 
 To see the synced secret:
 
@@ -102,7 +102,7 @@ kubectl describe VaultPKISecret flask-app-cert
 
 To see the serial number of the issued certificate presented by the Gateway:
 ```bash
-echo | openssl s_client -showcerts -connect 127.0.0.1:443 2>/dev/null | openssl x509 -noout -serial
+echo | openssl s_client -showcerts -connect 127.0.0.1:8443 2>/dev/null | openssl x509 -noout -serial
 ```
 
 To force a rotation of the TLS cert on the Gateway:
@@ -116,7 +116,7 @@ To force a rotation of the TLS cert on the Gateway:
     ```
 3. Check the serial number again to confirm it has changed:
     ```bash
-    echo | openssl s_client -showcerts -connect 127.0.0.1:443 2>/dev/null | openssl x509 -noout -serial
+    echo | openssl s_client -showcerts -connect 127.0.0.1:8443 2>/dev/null | openssl x509 -noout -serial
     ```
 
 ## Troubleshooting

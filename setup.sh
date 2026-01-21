@@ -56,7 +56,7 @@ EOF
 
   # 2.5 Install Container Registry
   echo -e "${GREEN}Installing Container Registry...${NC}"
-  helm repo add twuni https://twuni.github.io/docker-registry.helm/
+  helm repo add twuni https://twuni.github.io/docker-registry.helm/ --force-update
   helm repo update
 
   # Install docker-registry using Helm
@@ -213,7 +213,7 @@ EOF
 
   # 4. Install Vault and VSO
   echo -e "${GREEN}Adding HashiCorp Helm repo...${NC}"
-  helm repo add hashicorp https://helm.releases.hashicorp.com
+  helm repo add hashicorp https://helm.releases.hashicorp.com --force-update
   helm repo update
 
   echo -e "${GREEN}Installing Vault (Dev Mode)...${NC}"

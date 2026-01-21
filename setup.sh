@@ -43,6 +43,7 @@ if [ "$REDEPLOY_ONLY" == "false" ]; then
 
   # Create registry config for containerd
   echo -e "${GREEN}Generating registry configuration...${NC}"
+  rm -rf registry-config
   mkdir -p registry-config/registry-docker-registry.default.svc.cluster.local:5000
   cat <<EOF > registry-config/registry-docker-registry.default.svc.cluster.local:5000/hosts.toml
 server = "http://registry-docker-registry.default.svc.cluster.local:5000"
@@ -479,7 +480,7 @@ echo ""
 echo "2. Inside the pod, update the secret (e.g., change username/password):"
 echo "   vault kv put secret/example username=newuser password=newpass"
 echo ""
-echo "   (Wait up to 10s for VSO to sync, then check http://localhost/8080/secret again)"
+echo "   (Wait up to 10s for VSO to sync, then check http://localhost:8080/secret again)"
 echo ""
 echo "To see the status of the synced k8s certificate:"
 echo "    kubectl describe VaultPKISecret flask-app-cert"

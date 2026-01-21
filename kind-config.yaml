@@ -3,8 +3,8 @@ apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
 - role: control-plane
   extraMounts:
-  - hostPath: ./registry-config/registry-docker-registry.default.svc.cluster.local:5000
-    containerPath: /etc/containerd/certs.d/registry-docker-registry.default.svc.cluster.local:5000
+  - hostPath: ./registry-config
+    containerPath: /etc/containerd/certs.d
   extraPortMappings:
   - containerPort: 30080
     hostPort: 8080

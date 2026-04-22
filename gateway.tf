@@ -55,8 +55,9 @@ resource "kubernetes_manifest" "gateway_class" {
   depends_on = [kubernetes_manifest.envoy_proxy_config]
 }
 
-# Gateway with HTTP listener only — HTTPS is added after the TLS cert is provisioned
-# (see null_resource.gateway_add_https_listener below)
+# Gateway with both HTTP and HTTPS listeners declared up-front. The HTTPS listener will
+# be in a "not ready" state until VSO provisions the flask-app-tls cert in Phase 3;
+# Envoy Gateway reconciles automatically once the cert exists.
 resource "kubernetes_manifest" "gateway" {
   manifest = {
     apiVersion = "gateway.networking.k8s.io/v1"
@@ -72,6 +73,17 @@ resource "kubernetes_manifest" "gateway" {
           name     = "http"
           protocol = "HTTP"
           port     = 80
+        },
+        {
+          name     = "https"
+          protocol = "HTTPS"
+          port     = 443
+          tls = {
+            mode = "Terminate"
+            certificateRefs = [{
+              name = "flask-app-tls"
+            }]
+          }
         }
       ]
     }
@@ -117,7 +129,7 @@ data "external" "envoy_http_port" {
         PORT=$(kubectl get svc \
           -n envoy-gateway-system \
           -l gateway.envoyproxy.io/owning-gateway-name=eg \
-          -o jsonpath='{.items[0].spec.ports[?(@.name=="http")].targetPort}' 2>/dev/null)
+          -o jsonpath='{.items[0].spec.ports[?(@.name=="http-80")].targetPort}' 2>/dev/null)
         [ -z "$PORT" ] && PORT=$(kubectl get svc \
           -n envoy-gateway-system \
           -l gateway.envoyproxy.io/owning-gateway-name=eg \
@@ -157,37 +169,26 @@ resource "kubernetes_service" "gateway_nodeports_http" {
   depends_on = [data.external.envoy_http_port]
 }
 
-# --- HTTPS Listener + NodePort (Phase 3, after TLS cert is provisioned by VSO) ---
-
-# Patch the Gateway to add the HTTPS listener once flask-app-tls secret exists
-resource "null_resource" "gateway_add_https_listener" {
-  provisioner "local-exec" {
-    command = <<-CMD
-      kubectl patch gateway eg -n default --type=merge -p '{
-        "spec": {"listeners": [
-          {"name": "http", "protocol": "HTTP", "port": 80},
-          {"name": "https", "protocol": "HTTPS", "port": 443, "tls": {
-            "mode": "Terminate",
-            "certificateRefs": [{"name": "flask-app-tls"}]
-          }}
-        ]}
-      }'
-    CMD
-  }
-  # vault_pki_secret (in vso.tf) triggers VSO to create flask-app-tls
-  depends_on = [kubernetes_manifest.vault_pki_secret]
-}
+# --- HTTPS NodePort (Phase 3, after TLS cert is provisioned by VSO) ---
+# The HTTPS listener is declared in kubernetes_manifest.gateway above. Envoy Gateway
+# reconciles it automatically once VSO creates the flask-app-tls cert. This data source
+# waits for both the cert and the resulting HTTPS port before the NodePort service is built.
 
 data "external" "envoy_https_port" {
   program = [
     "bash", "-c", <<-SCRIPT
-      RETRIES=30
-      SLEEP=3
+      RETRIES=60
+      SLEEP=5
       for ((i=1; i<=RETRIES; i++)); do
+        if ! kubectl get secret flask-app-tls -n default >/dev/null 2>&1; then
+          echo "Waiting for flask-app-tls secret... ($i/$RETRIES)" >&2
+          sleep $SLEEP
+          continue
+        fi
         PORT=$(kubectl get svc \
           -n envoy-gateway-system \
           -l gateway.envoyproxy.io/owning-gateway-name=eg \
-          -o jsonpath='{.items[0].spec.ports[?(@.name=="https")].targetPort}' 2>/dev/null)
+          -o jsonpath='{.items[0].spec.ports[?(@.name=="https-443")].targetPort}' 2>/dev/null)
         [ -z "$PORT" ] && PORT=$(kubectl get svc \
           -n envoy-gateway-system \
           -l gateway.envoyproxy.io/owning-gateway-name=eg \
@@ -196,12 +197,14 @@ data "external" "envoy_https_port" {
           echo "{\"port\": \"$PORT\"}"
           exit 0
         fi
+        echo "Cert ready, waiting for Envoy HTTPS port... ($i/$RETRIES)" >&2
         sleep $SLEEP
       done
-      echo "{\"port\": \"443\"}"
+      echo "Timeout waiting for HTTPS port" >&2
+      exit 1
     SCRIPT
   ]
-  depends_on = [null_resource.gateway_add_https_listener]
+  depends_on = [kubernetes_manifest.vault_pki_secret]
 }
 
 # HTTPS-only NodePort service — created after TLS cert + HTTPS listener are active

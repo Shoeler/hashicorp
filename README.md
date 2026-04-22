@@ -1,6 +1,6 @@
 # Vault with Kind and Vault Secrets Operator
 
-This project sets up a local HashiCorp Vault instance and the Vault Secrets Operator (VSO) on a Kind Kubernetes cluster. It uses Terraform to configure Vault and the VSO resources.  Additionally, it uses gatewayAPI / envoy to expose ports locally instead of having to use port-forward.
+This project sets up a local HashiCorp Vault instance and the Vault Secrets Operator (VSO) on a Kind Kubernetes cluster. Terraform manages all infrastructure — Helm releases, Gateway resources, Vault configuration, and VSO CRDs. Additionally, it uses Gateway API / Envoy to expose ports locally instead of having to use port-forward.
 
 **This script will delete and reinstall the KIND cluster if one already exists, so be intentional about re-running it!**
 
@@ -36,12 +36,12 @@ Run the setup script with --redeploy-flask:
 
 This script will:
 1.  Create or recreate a Kind cluster named `vault-demo`.
-2.  Install envoy gateway via Helm to handle cluster ingress
-3.  Install Vault (in dev mode) via Helm to the kind cluster as a pod.
-4.  Install Vault Secrets Operator via Helm to the kind cluster.
-5.  Configure Vault and the Operator using Terraform.
-6.  Verify that a sample secret is synced from Vault to a Kubernetes Secret by deploying a simple flask app that reads the secret's contents with an API call
-7.  Verify that a TLS certificate is issued by Vault and synced to a Kubernetes Secret, enabling HTTPS on the Gateway.
+2.  Run Terraform in three phases:
+    - **Phase 1**: Install Helm releases (container registry, Envoy Gateway, Vault, VSO).
+    - **Phase 2**: Create Gateway infrastructure — dynamically detects Envoy container ports (safe on macOS/Podman) and creates the HTTP NodePort service so Vault becomes accessible.
+    - **Phase 3**: Full apply — configures Vault (KV, PKI, Kubernetes auth), deploys VSO CRDs, builds and pushes the Flask app image, and deploys the app.
+3.  Verify that a sample secret is synced from Vault to a Kubernetes Secret by calling the Flask app's `/secret` endpoint.
+4.  Verify that a TLS certificate is issued by Vault and synced to a Kubernetes Secret, enabling HTTPS on the Gateway.
 
 ## Architecture
 
@@ -59,8 +59,8 @@ This script will:
     *   A simple Python application that reads secrets from the environment.
     *   Exposed via the Gateway on `/secret`.
 *   **Infrastructure as Code**:
-    *   **Helm**: Deploys Vault, VSO, Envoy Gateway, and the application.
-    *   **Terraform**: Configures Vault internals (Auth methods, PKI engine/roles, KV secrets) and VSO resources (`VaultConnection`, `VaultAuth`, `VaultStaticSecret`, `VaultPKISecret`).
+    *   **Terraform**: Manages everything after the Kind cluster is created — Helm releases (Vault, VSO, Envoy Gateway, container registry, Flask app), all Kubernetes Gateway resources, Vault internals (auth methods, PKI engine/roles, KV secrets), and VSO resources (`VaultConnection`, `VaultAuth`, `VaultStaticSecret`, `VaultPKISecret`).
+    *   `setup.sh` is a thin bootstrap: it creates the Kind cluster, runs `terraform init`, and orchestrates three targeted `terraform apply` phases to resolve provider bootstrap ordering.
 
 ## TLS Certificate Plumbing
 

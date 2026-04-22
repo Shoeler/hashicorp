@@ -1,0 +1,4 @@
+server = "http://registry-docker-registry.default.svc.cluster.local:5000"
+
+[host."http://127.0.0.1:30500"]
+  capabilities = ["pull", "resolve"]

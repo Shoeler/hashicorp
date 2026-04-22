@@ -8,6 +8,7 @@ resource "helm_release" "envoy_gateway" {
   namespace        = "envoy-gateway-system"
   create_namespace = true
   wait             = true
+  timeout          = 600
 }
 
 # --- Envoy Gateway Kubernetes Resources ---

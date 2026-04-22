@@ -14,7 +14,8 @@ resource "helm_release" "vault" {
     value = var.vault_dev_token
   }
 
-  wait = true
+  wait    = true
+  timeout = 600
 }
 
 # --- Vault Configuration ---

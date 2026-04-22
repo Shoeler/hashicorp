@@ -11,6 +11,7 @@ resource "helm_release" "vault_secrets_operator" {
   }
 
   wait       = true
+  timeout    = 600
   depends_on = [helm_release.vault]
 }
 

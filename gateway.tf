@@ -135,29 +135,23 @@ data "external" "envoy_http_port" {
 }
 
 # HTTP-only NodePort service — created in Phase 2 so Vault is accessible before Phase 3
-resource "kubernetes_manifest" "gateway_nodeports_http" {
-  manifest = {
-    apiVersion = "v1"
-    kind       = "Service"
-    metadata = {
-      name      = "gateway-nodeports-http"
-      namespace = "envoy-gateway-system"
+resource "kubernetes_service" "gateway_nodeports_http" {
+  metadata {
+    name      = "gateway-nodeports-http"
+    namespace = "envoy-gateway-system"
+  }
+  spec {
+    type = "NodePort"
+    selector = {
+      "gateway.envoyproxy.io/owning-gateway-name"      = "eg"
+      "gateway.envoyproxy.io/owning-gateway-namespace" = "default"
     }
-    spec = {
-      type = "NodePort"
-      selector = {
-        "gateway.envoyproxy.io/owning-gateway-name"      = "eg"
-        "gateway.envoyproxy.io/owning-gateway-namespace" = "default"
-      }
-      ports = [
-        {
-          name       = "http"
-          port       = 80
-          targetPort = tonumber(data.external.envoy_http_port.result.port)
-          nodePort   = var.gateway_http_node_port
-          protocol   = "TCP"
-        }
-      ]
+    port {
+      name        = "http"
+      port        = 80
+      target_port = data.external.envoy_http_port.result.port
+      node_port   = var.gateway_http_node_port
+      protocol    = "TCP"
     }
   }
   depends_on = [data.external.envoy_http_port]
@@ -211,29 +205,23 @@ data "external" "envoy_https_port" {
 }
 
 # HTTPS-only NodePort service — created after TLS cert + HTTPS listener are active
-resource "kubernetes_manifest" "gateway_nodeports_https" {
-  manifest = {
-    apiVersion = "v1"
-    kind       = "Service"
-    metadata = {
-      name      = "gateway-nodeports-https"
-      namespace = "envoy-gateway-system"
+resource "kubernetes_service" "gateway_nodeports_https" {
+  metadata {
+    name      = "gateway-nodeports-https"
+    namespace = "envoy-gateway-system"
+  }
+  spec {
+    type = "NodePort"
+    selector = {
+      "gateway.envoyproxy.io/owning-gateway-name"      = "eg"
+      "gateway.envoyproxy.io/owning-gateway-namespace" = "default"
     }
-    spec = {
-      type = "NodePort"
-      selector = {
-        "gateway.envoyproxy.io/owning-gateway-name"      = "eg"
-        "gateway.envoyproxy.io/owning-gateway-namespace" = "default"
-      }
-      ports = [
-        {
-          name       = "https"
-          port       = 443
-          targetPort = tonumber(data.external.envoy_https_port.result.port)
-          nodePort   = var.gateway_https_node_port
-          protocol   = "TCP"
-        }
-      ]
+    port {
+      name        = "https"
+      port        = 443
+      target_port = data.external.envoy_https_port.result.port
+      node_port   = var.gateway_https_node_port
+      protocol    = "TCP"
     }
   }
   depends_on = [data.external.envoy_https_port]

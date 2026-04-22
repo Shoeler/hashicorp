@@ -33,6 +33,6 @@ resource "helm_release" "flask_app" {
   depends_on = [
     null_resource.flask_image,
     kubernetes_manifest.vault_static_secret,
-    kubernetes_manifest.gateway_nodeports_http,
+    kubernetes_service.gateway_nodeports_http,
   ]
 }

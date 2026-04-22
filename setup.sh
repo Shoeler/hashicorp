@@ -78,7 +78,7 @@ EOF
   #   gateway_nodeports_http → data.external.envoy_http_port → kubernetes_manifest.gateway
   #   → kubernetes_manifest.gateway_class → kubernetes_manifest.envoy_proxy_config
   terraform apply -auto-approve \
-    -target=kubernetes_manifest.gateway_nodeports_http \
+    -target=kubernetes_service.gateway_nodeports_http \
     -target=kubernetes_manifest.vault_httproute
 
   # Wait for Vault to be reachable via Gateway before Phase 3

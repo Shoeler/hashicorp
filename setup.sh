@@ -64,6 +64,10 @@ EOF
 
   kind create cluster --name "${CLUSTER_NAME}" --config kind-config.yaml
   ok "Cluster created"
+  # Fresh cluster means the in-cluster registry is empty. Taint the flask image
+  # resource so it always rebuilds and pushes on this run, regardless of whether
+  # the Dockerfile/app source has changed since the last terraform state update.
+  terraform taint null_resource.flask_image 2>/dev/null || true
 
   # 3. Terraform — three phases to handle provider bootstrap ordering:
   #   Phase 1: Helm releases only (installs CRDs; vault provider not invoked)

@@ -1,47 +1,58 @@
 #!/bin/bash
 set -e
 
-# Colors for output
+BOLD='\033[1m'
+RED='\033[0;31m'
 GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+CYAN='\033[0;36m'
+NC='\033[0m'
 
 CLUSTER_NAME="vault-demo"
 REDEPLOY_ONLY=false
 
-# Check for redeploy flag
+section() { echo -e "\n${BOLD}${BLUE}==> $*${NC}"; }
+ok()      { echo -e "    ${GREEN}✓${NC} $*"; }
+info()    { echo -e "    ${CYAN}->${NC} $*"; }
+waiting() { echo -e "    ${YELLOW}..${NC} $*"; }
+err()     { echo -e "\n    ${RED}✗ Error:${NC} $*" >&2; }
+hr()      { echo -e "${BLUE}────────────────────────────────────────────────────────────${NC}"; }
+
+hr
+echo -e "${BOLD}  Vault Demo Setup${NC}"
+hr
+
 if [ "$1" == "--redeploy-flask" ]; then
   REDEPLOY_ONLY=true
-  echo -e "${BLUE}Redeploying Flask App only...${NC}"
+  echo -e "\n  Mode: Flask App redeploy only"
 fi
 
-echo -e "${BLUE}Starting Setup...${NC}"
+# 1. Prerequisite checks
+section "Checking prerequisites"
+for cmd in kind kubectl helm terraform; do
+  command -v "$cmd" >/dev/null 2>&1 || { err "$cmd is required but not installed."; exit 1; }
+  ok "$cmd"
+done
 
-# 1. Prerequisite Checks
-command -v kind >/dev/null 2>&1 || { echo >&2 "kind is required but not installed. Aborting."; exit 1; }
-command -v kubectl >/dev/null 2>&1 || { echo >&2 "kubectl is required but not installed. Aborting."; exit 1; }
-command -v helm >/dev/null 2>&1 || { echo >&2 "helm is required but not installed. Aborting."; exit 1; }
-command -v terraform >/dev/null 2>&1 || { echo >&2 "terraform is required but not installed. Aborting."; exit 1; }
-
-# Check for Podman and configure Kind to use it
 if command -v podman >/dev/null 2>&1; then
-  echo -e "${BLUE}Podman detected. Configuring Kind to use podman...${NC}"
+  ok "podman (configuring Kind to use it)"
   export KIND_EXPERIMENTAL_PROVIDER=podman
 else
-  command -v docker >/dev/null 2>&1 || { echo >&2 "neither podman nor docker found. Aborting."; exit 1; }
+  command -v docker >/dev/null 2>&1 || { err "neither podman nor docker found."; exit 1; }
+  ok "docker"
 fi
 
 if [ "$REDEPLOY_ONLY" == "false" ]; then
-  # 2. Create Kind Cluster
+
+  # 2. Create Kind cluster
+  section "Creating Kind cluster: ${CLUSTER_NAME}"
   if kind get clusters | grep -q "^${CLUSTER_NAME}$"; then
-    echo -e "${BLUE}Cluster ${CLUSTER_NAME} already exists. Deleting it to start fresh...${NC}"
+    waiting "Cluster already exists — deleting to start fresh..."
     kind delete cluster --name "${CLUSTER_NAME}"
   fi
 
-  echo -e "${GREEN}Creating Kind cluster: ${CLUSTER_NAME}...${NC}"
-
-  # Create registry config for containerd (must exist before kind create cluster mounts it)
-  echo -e "${GREEN}Generating registry configuration...${NC}"
+  info "Generating registry configuration..."
   rm -rf registry-config
   mkdir -p registry-config/registry-docker-registry.default.svc.cluster.local:5000
   cat <<EOF > registry-config/registry-docker-registry.default.svc.cluster.local:5000/hosts.toml
@@ -52,70 +63,73 @@ server = "http://registry-docker-registry.default.svc.cluster.local:5000"
 EOF
 
   kind create cluster --name "${CLUSTER_NAME}" --config kind-config.yaml
+  ok "Cluster created"
+  # Fresh cluster means the in-cluster registry is empty. Taint the flask image
+  # resource so it always rebuilds and pushes on this run, regardless of whether
+  # the Dockerfile/app source has changed since the last terraform state update.
+  terraform taint null_resource.flask_image 2>/dev/null || true
 
-  # 3. Initialize and run Terraform in three phases to handle provider bootstrap ordering:
-  #
-  #   Phase 1 — Helm releases only (installs CRDs; vault provider not invoked)
-  #   Phase 2 — Gateway k8s resources only (makes Vault accessible via NodePort)
-  #   Phase 3 — Full apply (vault provider can now connect)
-  #
-  # This ordering is required because the vault Terraform provider must connect to
-  # Vault at startup, and Vault is only reachable after the Gateway NodePort service
-  # is created (Phase 2).
+  # 3. Terraform — three phases to handle provider bootstrap ordering:
+  #   Phase 1: Helm releases only (installs CRDs; vault provider not invoked)
+  #   Phase 2: Gateway k8s resources (makes Vault accessible via NodePort)
+  #   Phase 3: Full apply (vault provider can now connect)
 
-  echo -e "${GREEN}Initializing Terraform...${NC}"
+  section "Initializing Terraform"
   terraform init
 
-  echo -e "${GREEN}Phase 1: Installing Helm releases (registry, envoy gateway, vault, VSO)...${NC}"
+  section "Phase 1: Installing Helm releases"
+  info "Installing: registry, envoy gateway, vault, VSO..."
   terraform apply -auto-approve \
     -target=helm_release.registry \
     -target=helm_release.envoy_gateway \
     -target=helm_release.vault \
     -target=helm_release.vault_secrets_operator
+  ok "Helm releases installed"
 
-  echo -e "${GREEN}Phase 2: Creating Gateway infrastructure (makes Vault accessible)...${NC}"
-  # -target automatically pulls in dependencies:
-  #   gateway_nodeports_http → data.external.envoy_http_port → kubernetes_manifest.gateway
-  #   → kubernetes_manifest.gateway_class → kubernetes_manifest.envoy_proxy_config
+  section "Phase 2: Creating Gateway infrastructure"
   terraform apply -auto-approve \
     -target=kubernetes_service.gateway_nodeports_http \
     -target=kubernetes_manifest.vault_httproute
+  ok "Gateway infrastructure created"
 
   # Wait for Vault to be reachable via Gateway before Phase 3
-  echo -e "${BLUE}Waiting for Vault to be reachable via Gateway...${NC}"
+  section "Waiting for Vault to be reachable"
   RETRIES=30
   SLEEP=5
   VAULT_READY=false
   for ((i=1; i<=RETRIES; i++)); do
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/v1/sys/health || echo "000")
     if [[ "$HTTP_CODE" =~ ^(200|429|472|473|501|503)$ ]]; then
-      echo "Vault is reachable (HTTP $HTTP_CODE)."
+      ok "Vault is reachable (HTTP $HTTP_CODE)"
       VAULT_READY=true
       break
     fi
-    echo "Attempt $i/$RETRIES: Vault not reachable (HTTP $HTTP_CODE)..."
+    waiting "Attempt $i/$RETRIES: not reachable yet (HTTP $HTTP_CODE)..."
     sleep $SLEEP
   done
 
   if [ "$VAULT_READY" = false ]; then
-    echo -e "\033[0;31mError: Vault is not reachable via Gateway. Cannot proceed with Terraform.\033[0m"
+    err "Vault is not reachable via Gateway. Cannot proceed with Terraform."
     exit 1
   fi
 
-  # Import the 'secret' mount if it exists (Vault Dev Mode pre-creates it)
-  echo -e "${BLUE}Checking for existing secret mount...${NC}"
+  section "Importing existing Vault state"
   if ! terraform state list | grep -q "vault_mount.kvv2"; then
-    echo "Importing existing secret mount..."
+    info "Importing existing 'secret' mount (Vault Dev Mode pre-creates it)..."
     terraform import vault_mount.kvv2 secret || true
+  else
+    info "Secret mount already in state — skipping import."
   fi
 
-  echo -e "${GREEN}Phase 3: Applying full Terraform configuration...${NC}"
+  section "Phase 3: Full Terraform apply"
   terraform apply -auto-approve
+  ok "Terraform complete"
+
 fi
 
 # Verification
-echo -e "${BLUE}Verifying setup...${NC}"
-echo "Waiting for Vault Secrets Operator to sync the secret..."
+section "Verifying secrets"
+waiting "Waiting for Vault Secrets Operator to sync..."
 
 RETRIES=10
 SLEEP=5
@@ -126,40 +140,37 @@ for ((i=1; i<=RETRIES; i++)); do
     FOUND=true
     break
   fi
-  echo "Attempt $i/$RETRIES: Secrets not found yet..."
+  waiting "Attempt $i/$RETRIES: secrets not found yet..."
   sleep $SLEEP
 done
 
 if [ "$FOUND" = true ]; then
-  echo -e "${GREEN}Success! Secrets 'k8s-secret-from-vault' and 'flask-app-tls' found.${NC}"
-  echo "Content:"
-  kubectl get secret k8s-secret-from-vault -o jsonpath='{.data.username}' | base64 --decode
+  ok "Secrets found: k8s-secret-from-vault, flask-app-tls"
   echo ""
-  kubectl get secret k8s-secret-from-vault -o jsonpath='{.data.password}' | base64 --decode
-  echo ""
+  echo -e "    username: $(kubectl get secret k8s-secret-from-vault -o jsonpath='{.data.username}' | base64 --decode)"
+  echo -e "    password: $(kubectl get secret k8s-secret-from-vault -o jsonpath='{.data.password}' | base64 --decode)"
 else
-  echo -e "\033[0;31mError: Secret was not synced within the expected time.\033[0m"
+  err "Secret was not synced within the expected time."
   echo "Checking VaultStaticSecret status:"
   kubectl get vaultstaticsecret example-secret -o yaml
   exit 1
 fi
 
 if [ "$REDEPLOY_ONLY" == "true" ]; then
-  echo -e "${GREEN}Redeploying Flask App via Terraform...${NC}"
+  section "Redeploying Flask App"
   terraform apply -auto-approve -target=null_resource.flask_image -target=helm_release.flask_app
-
-  echo "Restarting deployment to pick up new image..."
+  info "Restarting deployment to pick up new image..."
   kubectl rollout restart deployment/flask-app
-  echo -e "${BLUE}Waiting for rollout to complete...${NC}"
+  waiting "Waiting for rollout to complete..."
   kubectl rollout status deployment/flask-app
+  ok "Flask App redeployed"
 fi
 
-echo -e "${BLUE}Waiting for Flask App to be ready...${NC}"
+section "Verifying Flask App"
+waiting "Waiting for deployment to be available..."
 kubectl wait --for=condition=available --timeout=60s deployment/flask-app
 
-echo -e "${GREEN}Verifying Flask App...${NC}"
-echo "Calling /secret endpoint via HTTP..."
-
+waiting "Probing /secret endpoint via HTTP..."
 RETRIES=20
 SLEEP=3
 SUCCESS=false
@@ -170,60 +181,62 @@ for ((i=1; i<=RETRIES; i++)); do
     SUCCESS=true
     break
   fi
-  echo "Attempt $i/$RETRIES: Got HTTP $HTTP_CODE. Waiting for Gateway route..."
+  waiting "Attempt $i/$RETRIES: HTTP $HTTP_CODE — waiting for Gateway route..."
   sleep $SLEEP
 done
 
 if [ "$SUCCESS" = true ]; then
+  ok "HTTP endpoint is up"
+  echo ""
   curl -s http://localhost:8080/secret | jq
-
-  echo "Calling https://localhost/secret endpoint via HTTPS..."
-  curl -v -sk https://localhost:8443/secret | jq
+  echo ""
+  info "HTTPS response:"
+  curl -sk https://localhost:8443/secret | jq
 else
-  echo -e "\033[0;31mError: Failed to reach /secret endpoint via Gateway.\033[0m"
+  err "Failed to reach /secret endpoint via Gateway."
   curl -v http://localhost:8080/secret
-
-  echo "Checking Gateway Status:"
+  echo "Checking Gateway status:"
   kubectl get gateway eg -n default -o yaml
   exit 1
 fi
 
-echo -e "${GREEN}Setup complete!${NC}"
-echo "You can interact with the cluster using: kubectl --context kind-${CLUSTER_NAME}"
-echo "Vault UI is available at http://localhost:8080/ui/ (Token: root)"
-echo "Flask App is available at http://localhost:8080/secret or https://localhost:8443/secret"
-
+# Final summary
 echo ""
-echo "To explore and modify secrets in Vault:"
-echo "1. Exec into the Vault pod:"
-echo "   kubectl exec -it vault-0 -- /bin/sh"
+hr
+echo -e "${BOLD}${GREEN}  Setup complete!${NC}"
+hr
 echo ""
-echo "2. Inside the pod, update the secret (e.g., change username/password):"
-echo "   vault kv put secret/example username=newuser password=newpass"
+echo -e "  ${BOLD}Cluster:${NC}    kubectl --context kind-${CLUSTER_NAME}"
+echo -e "  ${BOLD}Vault UI:${NC}   http://localhost:8080/ui/  (token: root)"
+echo -e "  ${BOLD}Flask App:${NC}  http://localhost:8080/secret"
+echo -e "              https://localhost:8443/secret"
 echo ""
-echo "   (Wait up to 10s for VSO to sync, then check http://localhost:8080/secret again)"
+hr
+echo -e "  ${BOLD}Common operations${NC}"
+hr
 echo ""
-echo "To see the status of the synced k8s certificate:"
-echo "    kubectl describe VaultPKISecret flask-app-cert"
-
+echo -e "  ${CYAN}Update a Vault secret:${NC}"
+echo -e "    kubectl exec -it vault-0 -- vault kv put secret/example username=newuser password=newpass"
+echo -e "    (VSO syncs within ~10s — check http://localhost:8080/secret)"
 echo ""
-echo "To see the serial number of the issued certificate presented by the Gateway:"
-echo "    echo | openssl s_client -showcerts -connect 127.0.0.1:8443 2>/dev/null | openssl x509 -noout -serial"
-
+echo -e "  ${CYAN}Check synced certificate status:${NC}"
+echo -e "    kubectl describe VaultPKISecret flask-app-cert"
 echo ""
-echo "To force a rotation of the TLS cert on the Gateway:"
-echo "    kubectl delete secret flask-app-tls"
-echo "    # Verify that the secret has been recreated:"
-echo "    kubectl get secret flask-app-tls"
-
+echo -e "  ${CYAN}View TLS certificate serial from Gateway:${NC}"
+echo -e "    echo | openssl s_client -showcerts -connect 127.0.0.1:8443 2>/dev/null | openssl x509 -noout -serial"
 echo ""
-echo "Troubleshooting:"
-echo "If verification fails, check the status of the Vault resources:"
-echo "    kubectl get vaultstaticsecret example-secret -o yaml"
-echo "    kubectl get vaultpkisecret flask-app-cert -o yaml"
+echo -e "  ${CYAN}Force TLS cert rotation:${NC}"
+echo -e "    kubectl delete secret flask-app-tls"
+echo -e "    kubectl get secret flask-app-tls  # verify recreation"
 echo ""
-echo "If the HTTPS gateway is not reachable, check the Gateway status:"
-echo "    kubectl get gateway eg -n default -o yaml"
-echo "    kubectl logs -n envoy-gateway-system -l control-plane=envoy-gateway"
+hr
+echo -e "  ${BOLD}Troubleshooting${NC}"
+hr
 echo ""
-echo "Note: 'VaultStaticSecret' may show a 'RolloutRestartTriggeredFailed' error initially if the deployment was not ready. This is typically harmless."
+echo -e "    kubectl get vaultstaticsecret example-secret -o yaml"
+echo -e "    kubectl get vaultpkisecret flask-app-cert -o yaml"
+echo -e "    kubectl get gateway eg -n default -o yaml"
+echo -e "    kubectl logs -n envoy-gateway-system -l control-plane=envoy-gateway"
+echo ""
+echo -e "  ${YELLOW}Note:${NC} VaultStaticSecret may show 'RolloutRestartTriggeredFailed' initially — typically harmless."
+echo ""

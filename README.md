@@ -15,8 +15,7 @@ Ensure you have the following tools preinstalled on your Mac:
 *   [Kind](https://kind.sigs.k8s.io/) (`brew install kind`)
 *   [Kubectl](https://kubernetes.io/docs/tasks/tools/) (`brew install kubectl`)
 *   [Helm](https://helm.sh/) (`brew install helm`)
-*   [tfenv](https://github.com/tfutils/tfenv) (`brew install tfenv && tfenv install && tfenv use`) - optional but strongly suggested
-*   [terraform](https://developer.hashicorp.com/terraform) - optional in case you don't want to use tfenv
+*   [tfenv](https://github.com/tfutils/tfenv) (`brew install tfenv`) — the repo includes a `.terraform-version` file; run `tfenv install && tfenv use` in the project root to activate the pinned version
 
 ## Quick Start
 

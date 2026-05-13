@@ -89,7 +89,39 @@ resource "kubernetes_manifest" "vault_static_secret" {
   depends_on = [kubernetes_manifest.vault_auth]
 }
 
-# 4. VaultPKISecret
+# 4. VaultDynamicSecret (ephemeral Postgres credentials)
+resource "kubernetes_manifest" "vault_dynamic_secret" {
+  manifest = {
+    apiVersion = "secrets.hashicorp.com/v1beta1"
+    kind       = "VaultDynamicSecret"
+    metadata = {
+      name      = "db-creds"
+      namespace = "default"
+    }
+    spec = {
+      vaultAuthRef = "default"
+      mount        = vault_mount.database.path
+      path         = "creds/${vault_database_secret_backend_role.flask_app_db.name}"
+      destination = {
+        create = true
+        name   = "db-dynamic-creds"
+      }
+      renewalPercent = 67
+      rolloutRestartTargets = [
+        {
+          kind = "Deployment"
+          name = "flask-app"
+        }
+      ]
+    }
+  }
+  depends_on = [
+    kubernetes_manifest.vault_auth,
+    vault_database_secret_backend_role.flask_app_db,
+  ]
+}
+
+# 5. VaultPKISecret
 resource "kubernetes_manifest" "vault_pki_secret" {
   manifest = {
     apiVersion = "secrets.hashicorp.com/v1beta1"

@@ -9,7 +9,6 @@ def get_secret():
     password = os.environ.get('SECRET_PASSWORD')
 
     if not username or not password:
-        # Fallback to file reading if env vars are not set
         try:
             with open('/etc/secrets/username', 'r') as f:
                 username = f.read().strip()
@@ -21,6 +20,20 @@ def get_secret():
     return jsonify({
         "username": username,
         "password": password
+    })
+
+@app.route('/dynamic-secret', methods=['GET'])
+def get_dynamic_secret():
+    username = os.environ.get('DB_USERNAME')
+    password = os.environ.get('DB_PASSWORD')
+
+    if not username or not password:
+        return jsonify({"error": "Dynamic secret not available"}), 500
+
+    return jsonify({
+        "db_username": username,
+        "db_password": password,
+        "note": "Ephemeral Postgres credentials — issued by Vault, auto-rotated by VSO"
     })
 
 if __name__ == '__main__':

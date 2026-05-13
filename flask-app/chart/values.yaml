@@ -12,3 +12,6 @@ service:
 
 secret:
   name: k8s-secret-from-vault
+
+dynamicSecret:
+  name: db-dynamic-creds

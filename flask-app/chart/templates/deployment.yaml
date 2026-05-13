@@ -43,3 +43,5 @@ spec:
                   name: {{ .Values.dynamicSecret.name }}
                   key: password
                   optional: true
+            - name: DB_HOST
+              value: {{ .Values.postgres.host }}

@@ -15,3 +15,6 @@ secret:
 
 dynamicSecret:
   name: db-dynamic-creds
+
+postgres:
+  host: postgres.default.svc

@@ -12,6 +12,9 @@ spec:
     - path:
         type: PathPrefix
         value: /secret
+    - path:
+        type: PathPrefix
+        value: /dynamic-secret
     backendRefs:
     - name: {{ .Chart.Name }}
       port: {{ .Values.service.port }}

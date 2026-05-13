@@ -97,6 +97,15 @@ path "secret/metadata/*" {
 path "pki/issue/*" {
   capabilities = ["create", "update"]
 }
+path "database/creds/flask-app-db-role" {
+  capabilities = ["read"]
+}
+path "sys/leases/renew" {
+  capabilities = ["update"]
+}
+path "sys/leases/revoke" {
+  capabilities = ["update"]
+}
 EOT
 }
 

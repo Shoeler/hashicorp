@@ -1,13 +1,18 @@
 SHELL := /bin/bash
 
-.PHONY: setup redeploy-app teardown \
+.PHONY: setup setup-ha redeploy-app teardown \
         demo-rotate-cert demo-update-secret demo-dynamic-creds demo-namespace-isolation
 
 CLUSTER_NAME := vault-demo
 
-# Full cluster teardown + rebuild (destructive — deletes and recreates Kind cluster)
+# Full cluster teardown + rebuild — Vault in dev mode (ephemeral, pre-initialized, token=root)
 setup:
 	./setup.sh
+
+# Full cluster teardown + rebuild — Vault in standalone mode (Raft storage, init/unseal required)
+# Init credentials are saved to vault-init.json (git-ignored)
+setup-ha:
+	./setup.sh --mode=standalone
 
 # Rebuild and redeploy only the Flask app — leaves cluster and Vault state intact
 redeploy-app:

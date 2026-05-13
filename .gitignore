@@ -43,3 +43,6 @@ registry-config/
 *.swp
 
 demo_steps.md
+
+# Vault standalone init output — contains unseal key and root token
+vault-init.json

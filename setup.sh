@@ -11,6 +11,7 @@ NC='\033[0m'
 
 CLUSTER_NAME="vault-demo"
 REDEPLOY_ONLY=false
+VAULT_MODE="dev"
 
 section() { echo -e "\n${BOLD}${BLUE}==> $*${NC}"; }
 ok()      { echo -e "    ${GREEN}✓${NC} $*"; }
@@ -23,10 +24,25 @@ hr
 echo -e "${BOLD}  Vault Demo Setup${NC}"
 hr
 
-if [ "$1" == "--redeploy-flask" ]; then
-  REDEPLOY_ONLY=true
-  echo -e "\n  Mode: Flask App redeploy only"
-fi
+for arg in "$@"; do
+  case "$arg" in
+    --redeploy-flask)
+      REDEPLOY_ONLY=true
+      echo -e "\n  Mode: Flask App redeploy only"
+      ;;
+    --mode=standalone)
+      VAULT_MODE="standalone"
+      echo -e "\n  Vault Mode: standalone (Raft storage — requires init/unseal)"
+      ;;
+    --mode=dev)
+      ;;
+    *)
+      err "Unknown argument: $arg"; exit 1
+      ;;
+  esac
+done
+
+export TF_VAR_vault_mode="$VAULT_MODE"
 
 # 1. Prerequisite checks
 section "Checking prerequisites"
@@ -64,6 +80,8 @@ EOF
 
   kind create cluster --name "${CLUSTER_NAME}" --config kind-config.yaml
   ok "Cluster created"
+  # Fresh cluster: stale init data is invalid — remove it so Phase 2.5 re-initializes
+  rm -f vault-init.json
   # Fresh cluster means the in-cluster registry is empty. Taint the flask image
   # resource so it always rebuilds and pushes on this run, regardless of whether
   # the Dockerfile/app source has changed since the last terraform state update.
@@ -116,11 +134,53 @@ EOF
     exit 1
   fi
 
+  if [ "$VAULT_MODE" == "standalone" ]; then
+    section "Phase 2.5: Initializing and unsealing Vault (standalone mode)"
+
+    waiting "Waiting for vault-0 container to start (pod will not be Ready until after unseal)..."
+    kubectl wait --for=jsonpath='{.status.phase}'=Running pod/vault-0 --timeout=120s
+
+    INIT_STATUS=$(kubectl exec vault-0 -- vault status -format=json 2>/dev/null \
+      | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('initialized','false'))" 2>/dev/null || echo "false")
+
+    if [ "$INIT_STATUS" != "True" ]; then
+      info "Initializing Vault (1 key share, threshold 1)..."
+      kubectl exec vault-0 -- vault operator init \
+        -key-shares=1 \
+        -key-threshold=1 \
+        -format=json > vault-init.json
+      ok "Vault initialized — credentials saved to vault-init.json (git-ignored)"
+    else
+      info "Vault already initialized — using existing vault-init.json"
+      if [ ! -f vault-init.json ]; then
+        err "vault-init.json not found but Vault reports initialized. Cannot proceed."
+        exit 1
+      fi
+    fi
+
+    UNSEAL_KEY=$(python3 -c "import json; d=json.load(open('vault-init.json')); print(d['unseal_keys_b64'][0])")
+    ROOT_TOKEN=$(python3 -c "import json; d=json.load(open('vault-init.json')); print(d['root_token'])")
+
+    SEALED=$(kubectl exec vault-0 -- vault status -format=json 2>/dev/null \
+      | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('sealed','true'))" 2>/dev/null || echo "true")
+
+    if [ "$SEALED" == "True" ]; then
+      info "Unsealing Vault..."
+      kubectl exec vault-0 -- vault operator unseal "$UNSEAL_KEY"
+      ok "Vault unsealed"
+    else
+      info "Vault is already unsealed"
+    fi
+
+    export TF_VAR_vault_dev_token="$ROOT_TOKEN"
+    ok "Root token exported — Terraform vault provider will use it for Phase 3"
+  fi
+
   section "Importing existing Vault state"
-  if ! terraform state list | grep -q "vault_mount.kvv2"; then
+  if [ "$VAULT_MODE" == "dev" ] && ! terraform state list | grep -q "vault_mount.kvv2"; then
     info "Importing existing 'secret' mount (Vault Dev Mode pre-creates it)..."
     terraform import vault_mount.kvv2 secret || true
-  else
+  elif [ "$VAULT_MODE" == "dev" ]; then
     info "Secret mount already in state — skipping import."
   fi
 

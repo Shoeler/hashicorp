@@ -6,13 +6,22 @@ resource "helm_release" "vault" {
   chart      = "vault"
   version    = "0.32.0"
 
-  set {
-    name  = "server.dev.enabled"
-    value = "true"
+  values = var.vault_mode == "standalone" ? [file("${path.module}/vault-standalone-values.yaml")] : []
+
+  dynamic "set" {
+    for_each = var.vault_mode == "dev" ? ["enabled"] : []
+    content {
+      name  = "server.dev.enabled"
+      value = "true"
+    }
   }
-  set {
-    name  = "server.dev.devRootToken"
-    value = var.vault_dev_token
+
+  dynamic "set" {
+    for_each = var.vault_mode == "dev" ? ["token"] : []
+    content {
+      name  = "server.dev.devRootToken"
+      value = var.vault_dev_token
+    }
   }
 
   wait    = true

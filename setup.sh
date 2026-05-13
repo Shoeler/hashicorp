@@ -137,8 +137,8 @@ EOF
   if [ "$VAULT_MODE" == "standalone" ]; then
     section "Phase 2.5: Initializing and unsealing Vault (standalone mode)"
 
-    waiting "Waiting for vault-0 pod to be ready..."
-    kubectl wait --for=condition=ready pod/vault-0 --timeout=120s
+    waiting "Waiting for vault-0 container to start (pod will not be Ready until after unseal)..."
+    kubectl wait --for=jsonpath='{.status.phase}'=Running pod/vault-0 --timeout=120s
 
     INIT_STATUS=$(kubectl exec vault-0 -- vault status -format=json 2>/dev/null \
       | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('initialized','false'))" 2>/dev/null || echo "false")

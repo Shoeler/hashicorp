@@ -95,3 +95,25 @@ resource "vault_database_secret_backend_role" "flask_app_db" {
   default_ttl = 3600
   max_ttl     = 86400
 }
+
+# Seed a products table so /db-query has data to return.
+# Runs once after Vault has verified the Postgres connection, guaranteeing
+# the table exists before any dynamic credentials are issued.
+resource "null_resource" "seed_postgres" {
+  provisioner "local-exec" {
+    command = <<-SHELL
+      printf '%s\n' \
+        "CREATE TABLE IF NOT EXISTS products (id SERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE, description TEXT);" \
+        "INSERT INTO products (name, description) VALUES" \
+        "  ('widget',    'A small mechanical component')," \
+        "  ('gadget',    'An electronic device')," \
+        "  ('doohickey', 'A thing whose name you cannot remember')" \
+        "ON CONFLICT (name) DO NOTHING;" \
+        "GRANT SELECT ON ALL TABLES IN SCHEMA public TO PUBLIC;" \
+      | kubectl --context kind-${var.cluster_name} exec -i deployment/postgres -n default \
+          -- psql -U postgres -d app
+    SHELL
+  }
+
+  depends_on = [vault_database_secret_backend_connection.postgres]
+}

@@ -16,7 +16,7 @@ make redeploy-app              # rebuild Flask image and redeploy only, cluster 
 make teardown                  # delete the Kind cluster
 make demo-rotate-cert          # delete TLS cert, watch VSO reissue, compare serials
 make demo-update-secret        # write new KV secret to Vault, observe Flask sync in ~10s
-make demo-dynamic-creds        # show ephemeral Postgres creds, force rotation, show new creds
+make demo-dynamic-creds        # show creds + DB query, force rotation, confirm new role in query
 make demo-namespace-isolation  # show scoped VaultAuth roles and flask-app tenant secret
 ```
 
@@ -65,7 +65,7 @@ Terraform can't run a single `apply` because the Vault provider needs Vault to b
 - **VaultConnection** (`vso.tf`): points VSO at `http://vault.default.svc:8200`.
 - **VaultAuth** (`vso.tf`): binds the `default` service account to `vso-role` via Kubernetes auth.
 - **VaultStaticSecret** (`vso.tf`): syncs `secret/data/example` → K8s Secret `k8s-secret-from-vault`. Refreshes every 10s; triggers a rollout restart on `flask-app` when the secret changes.
-- **VaultDynamicSecret** (`vso.tf`): requests ephemeral Postgres credentials from `database/creds/flask-app-db-role` → K8s Secret `db-dynamic-creds`. VSO renews the Vault lease at 67% of TTL (default 1h). Deleting the K8s Secret forces immediate re-issuance; also triggers a rollout restart.
+- **VaultDynamicSecret** (`vso.tf`): requests ephemeral Postgres credentials from `database/creds/flask-app-db-role` → K8s Secret `db-dynamic-creds`. VSO renews the Vault lease at 67% of TTL (default 1h). Deleting the K8s Secret forces immediate re-issuance; also triggers a rollout restart. The `/db-query` endpoint issues a live `SELECT` against the `products` table using these credentials — the `connected_as` field in the response shows the Vault-issued Postgres role name, making rotation visible.
 - **VaultPKISecret** (`vso.tf`): issues a cert for `flask-app.default.svc` from the `pki` engine → K8s TLS Secret `flask-app-tls`. Deleting the secret forces immediate re-issuance.
 
 ### TLS certificate flow
@@ -94,7 +94,11 @@ Both namespaces have a `VaultConnection` and `VaultAuth` named `default` — Kub
 
 Reads KV creds as env vars (`SECRET_USERNAME`, `SECRET_PASSWORD`) from `k8s-secret-from-vault` and dynamic DB creds (`DB_USERNAME`, `DB_PASSWORD`) from `db-dynamic-creds`. The DB env vars are `optional: true` — the pod starts without them and returns 500 at `/dynamic-secret` until VSO provisions the secret. Both secrets are mounted via `secretKeyRef` in the Helm chart (`flask-app/chart/templates/deployment.yaml`).
 
+`DB_HOST` is a plain env var (value: `postgres.default.svc`) set in the Helm chart. The `/db-query` endpoint uses `DB_USERNAME`/`DB_PASSWORD`/`DB_HOST` to open a psycopg2 connection, runs `SELECT current_user` and `SELECT id, name, description FROM products`, and returns both results — making it unambiguous which Vault-issued role is active. The `products` table is seeded by `null_resource.seed_postgres` in `database.tf` (runs in Phase 3 after Vault verifies the Postgres connection).
+
 ## Known quirks
+
+- The Terraform Helm provider does not detect changes to local chart template files on disk — only changes to `values` passed via HCL trigger a `helm upgrade`. When iterating on chart templates outside of `make setup`, run `terraform taint helm_release.flask_app && terraform apply -auto-approve -target=helm_release.flask_app` to force a re-apply.
 
 - `VaultStaticSecret` may show `RolloutRestartTriggeredFailed` on first sync if the `flask-app` deployment isn't ready yet. Benign; resolves automatically.
 - `vault_mount.kvv2` must be imported during Phase 2 (`terraform import vault_mount.kvv2 secret`) because Vault dev mode pre-creates the `secret/` engine. `setup.sh` handles this automatically (skipped in standalone mode).
@@ -111,4 +115,6 @@ Reads KV creds as env vars (`SECRET_USERNAME`, `SECRET_PASSWORD`) from `k8s-secr
 | Flask — KV secret (HTTPS) | https://localhost:8443/secret | self-signed |
 | Flask — dynamic creds (HTTP) | http://localhost:8080/dynamic-secret | — |
 | Flask — dynamic creds (HTTPS) | https://localhost:8443/dynamic-secret | self-signed |
+| Flask — DB query (HTTP) | http://localhost:8080/db-query | — |
+| Flask — DB query (HTTPS) | https://localhost:8443/db-query | self-signed |
 | Container registry | localhost:5001 | — |

@@ -61,29 +61,55 @@ demo-update-secret:
 	echo "==> Updated /secret response:"; \
 	curl -s http://localhost:8080/secret | python3 -m json.tool
 
-# Show ephemeral DB credentials, force rotation, confirm new credentials issued
+# Show ephemeral DB credentials, query Postgres, force rotation, confirm new credentials
 demo-dynamic-creds:
 	@echo ""; \
-	echo "==> Current dynamic database credentials (Vault-issued, TTL=1h):"; \
+	echo "==> K8s Secret 'db-dynamic-creds' (as synced by VSO):"; \
+	kubectl get secret db-dynamic-creds \
+	  -o custom-columns=\
+	NAME:.metadata.name,\
+	CREATED:.metadata.creationTimestamp,\
+	MANAGED-BY:.metadata.labels."app\.kubernetes\.io/managed-by"; \
+	echo ""; \
+	echo "==> Decoded credentials:"; \
 	echo "    username: $$(kubectl get secret db-dynamic-creds \
 	  -o jsonpath='{.data.username}' | base64 --decode)"; \
 	echo "    password: $$(kubectl get secret db-dynamic-creds \
 	  -o jsonpath='{.data.password}' | base64 --decode)"; \
 	echo ""; \
-	echo "==> Deleting secret — VSO requests a fresh lease from Vault..."; \
+	echo "==> Querying Postgres via /db-query (pre-rotation):"; \
+	curl -s http://localhost:8080/db-query | python3 -m json.tool; \
+	echo ""; \
+	echo "==> Forcing rotation — deleting 'db-dynamic-creds'..."; \
 	kubectl delete secret db-dynamic-creds; \
-	echo "==> Waiting for new credentials..."; \
+	echo "==> Waiting for VSO to request a new lease from Vault..."; \
 	for i in $$(seq 1 30); do \
 	  kubectl get secret db-dynamic-creds >/dev/null 2>&1 && break; \
 	  printf "."; sleep 1; \
 	done; echo ""; \
-	echo "==> New dynamic database credentials:"; \
+	echo "==> K8s Secret 'db-dynamic-creds' (re-issued by VSO):"; \
+	kubectl get secret db-dynamic-creds \
+	  -o custom-columns=\
+	NAME:.metadata.name,\
+	CREATED:.metadata.creationTimestamp,\
+	MANAGED-BY:.metadata.labels."app\.kubernetes\.io/managed-by"; \
+	echo ""; \
+	echo "==> New decoded credentials (different Postgres role):"; \
 	echo "    username: $$(kubectl get secret db-dynamic-creds \
 	  -o jsonpath='{.data.username}' | base64 --decode)"; \
 	echo "    password: $$(kubectl get secret db-dynamic-creds \
 	  -o jsonpath='{.data.password}' | base64 --decode)"; \
 	echo ""; \
-	echo "Each issuance creates a unique Postgres role — no shared long-lived passwords."
+	echo "==> Waiting for rollout restart triggered by VSO..."; \
+	kubectl rollout status deployment/flask-app --timeout=60s; \
+	echo ""; \
+	echo "==> Querying Postgres via /db-query (post-rotation — new Vault role):"; \
+	for i in $$(seq 1 15); do \
+	  BODY=$$(curl -sf http://localhost:8080/db-query 2>/dev/null); \
+	  [ -n "$$BODY" ] && echo "$$BODY" | python3 -m json.tool && break; \
+	  printf "."; sleep 1; \
+	done; echo ""; \
+	echo "The 'connected_as' field confirms the pod is using the rotated credential."
 
 # Demonstrate namespace isolation: show the flask-app tenant secret and compare auth roles
 demo-namespace-isolation:

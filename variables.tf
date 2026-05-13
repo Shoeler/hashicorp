@@ -16,8 +16,19 @@ variable "cluster_name" {
   default     = "vault-demo"
 }
 
+variable "vault_mode" {
+  description = "Vault deployment mode: 'dev' (ephemeral, no unseal) or 'standalone' (Raft storage, requires init/unseal)"
+  type        = string
+  default     = "dev"
+
+  validation {
+    condition     = contains(["dev", "standalone"], var.vault_mode)
+    error_message = "vault_mode must be 'dev' or 'standalone'."
+  }
+}
+
 variable "vault_dev_token" {
-  description = "Root token for Vault dev mode"
+  description = "Root token for Vault (dev mode uses 'root'; standalone mode uses the token from vault operator init)"
   type        = string
   default     = "root"
 }

@@ -4,7 +4,7 @@ A local demo showing how the **Vault Secrets Operator (VSO)** syncs secrets and 
 certificates from HashiCorp Vault into Kubernetes. Terraform manages everything after
 cluster creation — Helm releases, Vault config, VSO CRDs, and the Flask demo app.
 
-> **Warning:** `make setup` deletes and recreates the Kind cluster if one already exists.
+> **Warning:** `make setup` and `make setup-ha` delete and recreate the Kind cluster if one already exists.
 
 ---
 
@@ -38,7 +38,7 @@ cluster creation — Helm releases, Vault config, VSO CRDs, and the Flask demo a
                               │  Kubernetes auth
                               ▼
   ┌──────────────────────────────────────────────────┐
-  │  Vault  (dev mode · token: root)                 │
+  │  Vault  (dev mode or standalone/Raft)            │
   │                                                  │
   │  secret/example      ──► KV credentials          │
   │  pki/                ──► TLS certificate CA      │
@@ -83,7 +83,8 @@ Built for M-series Macs with Podman. Install before running setup:
 ## Quick Start
 
 ```bash
-make setup       # create cluster + full Terraform apply (~10 min)
+make setup       # create cluster + full Terraform apply (~10 min) — Vault dev mode
+make setup-ha    # same, but Vault in standalone mode with Raft storage (init/unseal required)
 make teardown    # delete the Kind cluster when done
 ```
 
@@ -97,13 +98,26 @@ make redeploy-app
 
 ## How it works
 
-`setup.sh` (invoked by `make setup`) runs three targeted Terraform phases to work around
+`setup.sh` (invoked by `make setup` / `make setup-ha`) runs targeted Terraform phases to work around
 provider bootstrap ordering — the Vault provider needs Vault reachable, but Vault only
 becomes reachable after the Gateway NodePort is created:
 
 1. **Phase 1** — Helm releases (Vault, VSO, Envoy Gateway, registry), Postgres pod, and the `flask-app` namespace.
 2. **Phase 2** — Gateway infrastructure and HTTP NodePort; Vault is now reachable at `http://localhost:8080`.
-3. **Phase 3** — Full apply: Vault engines (KV, PKI, database), auth methods, VSO CRDs, Flask image build and deploy, HTTPS NodePort.
+3. **Phase 2.5** *(standalone mode only)* — Runs `vault operator init` (saves unseal key + root token to `vault-init.json`) and `vault operator unseal`. Root token is exported as `TF_VAR_vault_dev_token` for Phase 3.
+4. **Phase 3** — Full apply: Vault engines (KV, PKI, database), auth methods, VSO CRDs, Flask image build and deploy, HTTPS NodePort.
+
+### Vault modes
+
+| | `make setup` (dev) | `make setup-ha` (standalone) |
+|---|---|---|
+| Storage | in-memory, ephemeral | Raft on `/vault/data` |
+| Init/unseal | automatic | `vault operator init` + unseal |
+| Root token | `root` (hardcoded) | generated; saved to `vault-init.json` |
+| Data on restart | lost | persists across pod restarts |
+| Use case | demos, local dev | closer to production behaviour |
+
+> **Caution:** `vault-init.json` contains the unseal key and root token — it is git-ignored and should never be committed.
 
 ---
 

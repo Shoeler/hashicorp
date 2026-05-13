@@ -10,7 +10,8 @@ A local demo environment showing how the Vault Secrets Operator (VSO) syncs secr
 
 **Primary interface — use `make` for everything:**
 ```bash
-make setup                     # full cluster + Terraform apply (~10 min, destructive)
+make setup                     # full cluster + Terraform apply (~10 min, destructive) — Vault dev mode
+make setup-ha                  # same but Vault in standalone mode (Raft, requires init/unseal)
 make redeploy-app              # rebuild Flask image and redeploy only, cluster intact
 make teardown                  # delete the Kind cluster
 make demo-rotate-cert          # delete TLS cert, watch VSO reissue, compare serials
@@ -50,11 +51,12 @@ kubectl logs -n envoy-gateway-system -l control-plane=envoy-gateway
 
 ### Phased Terraform bootstrap
 
-Terraform can't run a single `apply` because the Vault provider needs Vault to be reachable before it can configure it, but Vault becomes reachable only after the Gateway NodePort service is created. `setup.sh` (invoked by `make setup`) solves this with three targeted phases:
+Terraform can't run a single `apply` because the Vault provider needs Vault to be reachable before it can configure it, but Vault becomes reachable only after the Gateway NodePort service is created. `setup.sh` (invoked by `make setup` / `make setup-ha`) solves this with targeted phases:
 
 1. **Phase 1** — Installs Helm releases (registry, Envoy Gateway, Vault, VSO), deploys the Postgres pod and service, and creates the `flask-app` namespace. No Vault provider calls.
-2. **Phase 2** — Creates the HTTP NodePort service and the `vault` HTTPRoute, making Vault reachable at `http://localhost:8080`. Also imports `vault_mount.kvv2` — Vault dev mode pre-creates the `secret/` mount, so Terraform must import it rather than create it.
-3. **Phase 3** — Full `terraform apply`. Vault provider can now connect; configures KV/PKI/database engines, auth methods and policies, all VSO CRDs, builds and deploys the Flask app, creates the HTTPS NodePort after VSO provisions the TLS cert.
+2. **Phase 2** — Creates the HTTP NodePort service and the `vault` HTTPRoute, making Vault reachable at `http://localhost:8080`.
+3. **Phase 2.5** *(standalone mode only)* — `kubectl exec vault-0 -- vault operator init` (saves to `vault-init.json`) + `vault operator unseal`. Exports `TF_VAR_vault_dev_token` so the Vault provider uses the generated root token.
+4. **Phase 3** — Full `terraform apply`. Vault provider can now connect; configures KV/PKI/database engines, auth methods and policies, all VSO CRDs, builds and deploys the Flask app, creates the HTTPS NodePort after VSO provisions the TLS cert. In dev mode, also imports `vault_mount.kvv2` — Vault dev mode pre-creates the `secret/` mount, so Terraform must import it rather than create it.
 
 ### VSO resource dependency chain
 
@@ -95,15 +97,16 @@ Reads KV creds as env vars (`SECRET_USERNAME`, `SECRET_PASSWORD`) from `k8s-secr
 ## Known quirks
 
 - `VaultStaticSecret` may show `RolloutRestartTriggeredFailed` on first sync if the `flask-app` deployment isn't ready yet. Benign; resolves automatically.
-- `vault_mount.kvv2` must be imported during Phase 2 (`terraform import vault_mount.kvv2 secret`) because Vault dev mode pre-creates the `secret/` engine. `setup.sh` handles this automatically.
-- `make setup` / `./setup.sh` **deletes and recreates the Kind cluster**. All in-cluster Terraform state is invalidated; `setup.sh` taints `null_resource.flask_image` to force an image rebuild.
+- `vault_mount.kvv2` must be imported during Phase 2 (`terraform import vault_mount.kvv2 secret`) because Vault dev mode pre-creates the `secret/` engine. `setup.sh` handles this automatically (skipped in standalone mode).
+- `make setup` / `make setup-ha` **delete and recreate the Kind cluster**. All in-cluster Terraform state is invalidated; `setup.sh` taints `null_resource.flask_image` to force an image rebuild, and removes any stale `vault-init.json`.
 - `/dynamic-secret` returns 500 for a few seconds after first deploy while VSO provisions `db-dynamic-creds`. The `optional: true` secretKeyRef prevents CrashLoopBackOff.
+- In standalone mode, `vault-init.json` is written by `setup.sh` and is git-ignored. It contains the unseal key and root token. Do not delete it while the cluster is running — `make setup-ha` on an already-initialized cluster reads it to re-unseal.
 
 ## Access points (post-setup)
 
 | | URL | Auth |
 |---|---|---|
-| Vault UI | http://localhost:8080/ui/ | token: `root` |
+| Vault UI | http://localhost:8080/ui/ | token: `root` (dev) or from `vault-init.json` (standalone) |
 | Flask — KV secret (HTTP) | http://localhost:8080/secret | — |
 | Flask — KV secret (HTTPS) | https://localhost:8443/secret | self-signed |
 | Flask — dynamic creds (HTTP) | http://localhost:8080/dynamic-secret | — |

@@ -129,9 +129,10 @@ Base URLs: **HTTP** → `http://localhost:8080` · **HTTPS** → `https://localh
 |---|---|
 | `/ui/` | Vault UI — token: `root` |
 | `/secret` | KV credentials synced from `secret/example` |
-| `/dynamic-secret` | Ephemeral Postgres credentials from Vault database engine |
+| `/dynamic-secret` | Ephemeral Postgres credentials (username + password) |
+| `/db-query` | Live Postgres query using the current Vault-issued credentials |
 
-Both `/secret` and `/dynamic-secret` are available on HTTP and HTTPS.
+All Flask endpoints are available on HTTP and HTTPS.
 
 ---
 
@@ -140,7 +141,7 @@ Both `/secret` and `/dynamic-secret` are available on HTTP and HTTPS.
 ```bash
 make demo-rotate-cert          # delete TLS cert → VSO reissues → confirm serial changed
 make demo-update-secret        # update KV in Vault → observe Flask sync in ~10s
-make demo-dynamic-creds        # show ephemeral Postgres creds → force rotation → new creds
+make demo-dynamic-creds        # show creds + DB query → rotate → confirm new role in query
 make demo-namespace-isolation  # compare VaultAuth roles; show flask-app tenant secret
 ```
 
@@ -212,7 +213,7 @@ kubectl logs -l app=postgres
 
 Re-run `terraform apply -auto-approve` once Postgres is ready.
 
-### `/dynamic-secret` returns 500
+### `/dynamic-secret` or `/db-query` returns 500
 
 VSO issues the first credential set after the `VaultDynamicSecret` CRD is created.
 Allow ~10s after the Flask app starts:
@@ -220,6 +221,13 @@ Allow ~10s after the Flask app starts:
 ```bash
 kubectl describe VaultDynamicSecret db-creds
 kubectl get secret db-dynamic-creds
+```
+
+If `/db-query` returns a Postgres connection error after rotation, the rollout restart
+may still be in progress. Wait for it to finish:
+
+```bash
+kubectl rollout status deployment/flask-app
 ```
 
 ### `VaultStaticSecret` shows `RolloutRestartTriggeredFailed`

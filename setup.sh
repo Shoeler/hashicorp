@@ -77,14 +77,17 @@ EOF
   section "Initializing Terraform"
   terraform init
 
-  section "Phase 1: Installing Helm releases"
-  info "Installing: registry, envoy gateway, vault, VSO..."
+  section "Phase 1: Installing Helm releases and base infrastructure"
+  info "Installing: registry, envoy gateway, vault, VSO, postgres..."
   terraform apply -auto-approve \
     -target=helm_release.registry \
     -target=helm_release.envoy_gateway \
     -target=helm_release.vault \
-    -target=helm_release.vault_secrets_operator
-  ok "Helm releases installed"
+    -target=helm_release.vault_secrets_operator \
+    -target=kubernetes_deployment.postgres \
+    -target=kubernetes_service.postgres \
+    -target=kubernetes_namespace.flask_app
+  ok "Helm releases and base infrastructure installed"
 
   section "Phase 2: Creating Gateway infrastructure"
   terraform apply -auto-approve \
@@ -136,7 +139,9 @@ SLEEP=5
 FOUND=false
 
 for ((i=1; i<=RETRIES; i++)); do
-  if kubectl get secret k8s-secret-from-vault >/dev/null 2>&1 && kubectl get secret flask-app-tls >/dev/null 2>&1; then
+  if kubectl get secret k8s-secret-from-vault >/dev/null 2>&1 \
+    && kubectl get secret flask-app-tls >/dev/null 2>&1 \
+    && kubectl get secret db-dynamic-creds >/dev/null 2>&1; then
     FOUND=true
     break
   fi
@@ -145,14 +150,18 @@ for ((i=1; i<=RETRIES; i++)); do
 done
 
 if [ "$FOUND" = true ]; then
-  ok "Secrets found: k8s-secret-from-vault, flask-app-tls"
+  ok "Secrets found: k8s-secret-from-vault, flask-app-tls, db-dynamic-creds"
   echo ""
   echo -e "    username: $(kubectl get secret k8s-secret-from-vault -o jsonpath='{.data.username}' | base64 --decode)"
   echo -e "    password: $(kubectl get secret k8s-secret-from-vault -o jsonpath='{.data.password}' | base64 --decode)"
+  echo ""
+  echo -e "    db_username: $(kubectl get secret db-dynamic-creds -o jsonpath='{.data.username}' | base64 --decode)"
+  echo -e "    db_password: $(kubectl get secret db-dynamic-creds -o jsonpath='{.data.password}' | base64 --decode)"
 else
-  err "Secret was not synced within the expected time."
-  echo "Checking VaultStaticSecret status:"
+  err "One or more secrets were not synced within the expected time."
+  echo "Checking VSO resource status:"
   kubectl get vaultstaticsecret example-secret -o yaml
+  kubectl get vaultdynamicsecret db-creds -o yaml 2>/dev/null || true
   exit 1
 fi
 
@@ -210,24 +219,23 @@ echo -e "  ${BOLD}Cluster:${NC}    kubectl --context kind-${CLUSTER_NAME}"
 echo -e "  ${BOLD}Vault UI:${NC}   http://localhost:8080/ui/  (token: root)"
 echo -e "  ${BOLD}Flask App:${NC}  http://localhost:8080/secret"
 echo -e "              https://localhost:8443/secret"
+echo -e "              http://localhost:8080/dynamic-secret"
 echo ""
 hr
-echo -e "  ${BOLD}Common operations${NC}"
+echo -e "  ${BOLD}Demo scripts (run from project root)${NC}"
 hr
 echo ""
-echo -e "  ${CYAN}Update a Vault secret:${NC}"
-echo -e "    kubectl exec -it vault-0 -- vault kv put secret/example username=newuser password=newpass"
-echo -e "    (VSO syncs within ~10s — check http://localhost:8080/secret)"
+echo -e "  ${CYAN}Rotate TLS certificate (PKI):${NC}"
+echo -e "    make demo-rotate-cert"
 echo ""
-echo -e "  ${CYAN}Check synced certificate status:${NC}"
-echo -e "    kubectl describe VaultPKISecret flask-app-cert"
+echo -e "  ${CYAN}Update KV secret and watch it sync:${NC}"
+echo -e "    make demo-update-secret"
 echo ""
-echo -e "  ${CYAN}View TLS certificate serial from Gateway:${NC}"
-echo -e "    echo | openssl s_client -showcerts -connect 127.0.0.1:8443 2>/dev/null | openssl x509 -noout -serial"
+echo -e "  ${CYAN}Show ephemeral database credentials:${NC}"
+echo -e "    make demo-dynamic-creds"
 echo ""
-echo -e "  ${CYAN}Force TLS cert rotation:${NC}"
-echo -e "    kubectl delete secret flask-app-tls"
-echo -e "    kubectl get secret flask-app-tls  # verify recreation"
+echo -e "  ${CYAN}Namespace isolation — flask-app tenant secret:${NC}"
+echo -e "    kubectl get secret flask-app-isolated-secret -n flask-app -o yaml"
 echo ""
 hr
 echo -e "  ${BOLD}Troubleshooting${NC}"

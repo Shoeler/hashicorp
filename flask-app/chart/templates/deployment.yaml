@@ -31,3 +31,15 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.secret.name }}
                   key: password
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dynamicSecret.name }}
+                  key: username
+                  optional: true
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dynamicSecret.name }}
+                  key: password
+                  optional: true

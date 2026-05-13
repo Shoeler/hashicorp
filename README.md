@@ -1,8 +1,12 @@
 # Vault with Kind and Vault Secrets Operator
 
-A local demo environment showing how the [Vault Secrets Operator (VSO)](https://developer.hashicorp.com/vault/docs/platform/k8s/vso) syncs secrets and PKI certificates from HashiCorp Vault into Kubernetes. Terraform manages everything after cluster creation.
+A local demo showing how the **Vault Secrets Operator (VSO)** syncs secrets and PKI
+certificates from HashiCorp Vault into Kubernetes. Terraform manages everything after
+cluster creation — Helm releases, Vault config, VSO CRDs, and the Flask demo app.
 
 > **Warning:** `make setup` deletes and recreates the Kind cluster if one already exists.
+
+---
 
 ## Architecture
 
@@ -11,66 +15,70 @@ A local demo environment showing how the [Vault Secrets Operator (VSO)](https://
          │                               │
          │  NodePort 30080               │  NodePort 30443
          ▼                               ▼
-  ╔══════════════════════════════════════════════════╗
-  ║  Envoy Gateway                                   ║
-  ║  :80 (HTTP)   :443 (HTTPS) ◄── flask-app-tls    ║
-  ╚══════════════════╤═══════════════════════════════╝
+  ┌──────────────────────────────────────────────────┐
+  │  Envoy Gateway                                   │
+  │  :80 (HTTP)   :443 (HTTPS) ◄── flask-app-tls    │
+  └──────────────────┬───────────────────────────────┘
                      │  /secret, /dynamic-secret
                      ▼
-  ╔══════════════════════════════╗
-  ║  Flask App                   ║
-  ║  GET /secret                 ║  ◄── env: SECRET_USERNAME, SECRET_PASSWORD
-  ║  GET /dynamic-secret         ║  ◄── env: DB_USERNAME, DB_PASSWORD
-  ╚══════════════════════════════╝
-           ▲ K8s Secrets (env vars)
+  ┌──────────────────────────────┐
+  │  Flask App                   │
+  │  GET /secret                 │  ◄── SECRET_USERNAME, SECRET_PASSWORD
+  │  GET /dynamic-secret         │  ◄── DB_USERNAME, DB_PASSWORD
+  └──────────────────────────────┘
+           ▲ env vars from K8s Secrets
            │
-  ╔══════════════════════════════════════════════════╗
-  ║  Vault Secrets Operator (VSO)                    ║
-  ║                                                  ║
-  ║  VaultStaticSecret  ──► k8s-secret-from-vault   ║
-  ║  VaultDynamicSecret ──► db-dynamic-creds         ║
-  ║  VaultPKISecret     ──► flask-app-tls            ║
-  ╚═══════════════════════════╤══════════════════════╝
+  ┌──────────────────────────────────────────────────┐
+  │  Vault Secrets Operator (VSO)                    │
+  │                                                  │
+  │  VaultStaticSecret  ──► k8s-secret-from-vault    │
+  │  VaultDynamicSecret ──► db-dynamic-creds         │
+  │  VaultPKISecret     ──► flask-app-tls            │
+  └───────────────────────────┬──────────────────────┘
                               │  Kubernetes auth
                               ▼
-  ╔══════════════════════════════════════════════════╗
-  ║  Vault (dev mode, token: root)                   ║
-  ║                                                  ║
-  ║  secret/example      ──► KV credentials          ║
-  ║  pki/                ──► TLS certificate CA      ║
-  ║  database/           ──► Postgres dynamic creds  ║
-  ║  secret/flask-app/*  ──► namespace-isolated KV   ║
-  ╚══════════════════════════════════════════════════╝
+  ┌──────────────────────────────────────────────────┐
+  │  Vault  (dev mode · token: root)                 │
+  │                                                  │
+  │  secret/example      ──► KV credentials          │
+  │  pki/                ──► TLS certificate CA      │
+  │  database/           ──► Postgres dynamic creds  │
+  │  secret/flask-app/*  ──► namespace-isolated KV   │
+  └──────────────────────────────────────────────────┘
 ```
 
 ### Namespace isolation
 
-Each namespace gets its own `VaultAuth` bound to a scoped Vault role — a tenant in `flask-app` cannot read secrets owned by `default`, and vice versa:
+Each namespace gets its own `VaultAuth` bound to a scoped Vault role:
 
 ```
-  ┌─────────────────────────────┐   ┌──────────────────────────────┐
-  │  namespace: default         │   │  namespace: flask-app        │
-  │  role: vso-role             │   │  role: flask-app-role        │
-  │                             │   │                              │
-  │  ✓ secret/data/*            │   │  ✓ secret/flask-app/* only  │
-  │  ✓ pki/issue/*              │   │  ✗ secret/example           │
-  │  ✓ database/creds/*         │   │  ✗ pki/issue/*              │
-  │                             │   │  ✗ database/creds/*         │
-  │  k8s-secret-from-vault      │   │  flask-app-isolated-secret  │
-  │  db-dynamic-creds           │   │                              │
-  │  flask-app-tls              │   │                              │
-  └─────────────────────────────┘   └──────────────────────────────┘
+  ┌──────────────────────────────┐   ┌──────────────────────────────┐
+  │  namespace: default          │   │  namespace: flask-app        │
+  │  role: vso-role              │   │  role: flask-app-role        │
+  │                              │   │                              │
+  │  ✓ secret/data/*             │   │  ✓ secret/flask-app/* only  │
+  │  ✓ pki/issue/*               │   │  ✗ secret/example           │
+  │  ✓ database/creds/*          │   │  ✗ pki/issue/*              │
+  │                              │   │  ✗ database/creds/*         │
+  │  k8s-secret-from-vault       │   │  flask-app-isolated-secret  │
+  │  db-dynamic-creds            │   │                              │
+  │  flask-app-tls               │   │                              │
+  └──────────────────────────────┘   └──────────────────────────────┘
 ```
+
+---
 
 ## Prerequisites
 
-Built for M-series Macs with Podman. Requires:
+Built for M-series Macs with Podman. Install before running setup:
 
-- [Podman](https://podman.io): `brew install podman && podman machine init && podman machine set --rootful && podman machine start`
-- [Kind](https://kind.sigs.k8s.io/): `brew install kind`
-- `kubectl`: `brew install kubectl`
-- [Helm](https://helm.sh/): `brew install helm`
-- [tfenv](https://github.com/tfutils/tfenv): `brew install tfenv` — then `tfenv install && tfenv use` in the project root
+- **Podman** — `brew install podman` then `podman machine init && podman machine set --rootful && podman machine start`
+- **Kind** — `brew install kind`
+- **kubectl** — `brew install kubectl`
+- **Helm** — `brew install helm`
+- **tfenv** — `brew install tfenv` then `tfenv install && tfenv use` in the project root
+
+---
 
 ## Quick Start
 
@@ -79,43 +87,53 @@ make setup       # create cluster + full Terraform apply (~10 min)
 make teardown    # delete the Kind cluster when done
 ```
 
-To rebuild and redeploy only the Flask app without touching the cluster:
+Rebuild and redeploy only the Flask app without touching the cluster:
 
 ```bash
 make redeploy-app
 ```
 
+---
+
 ## How it works
 
-`setup.sh` (invoked by `make setup`) bootstraps in three Terraform phases to handle provider ordering:
+`setup.sh` (invoked by `make setup`) runs three targeted Terraform phases to work around
+provider bootstrap ordering — the Vault provider needs Vault reachable, but Vault only
+becomes reachable after the Gateway NodePort is created:
 
-1. **Phase 1** — Installs Helm releases (Vault, VSO, Envoy Gateway, registry) and creates the Postgres deployment and `flask-app` namespace.
-2. **Phase 2** — Creates Gateway infrastructure and the HTTP NodePort service, making Vault reachable at `http://localhost:8080`.
-3. **Phase 3** — Full `terraform apply`: configures Vault engines (KV, PKI, database), auth methods, VSO CRDs, builds the Flask image, and deploys the app. Creates the HTTPS NodePort after VSO issues the TLS cert.
+1. **Phase 1** — Helm releases (Vault, VSO, Envoy Gateway, registry), Postgres pod, and the `flask-app` namespace.
+2. **Phase 2** — Gateway infrastructure and HTTP NodePort; Vault is now reachable at `http://localhost:8080`.
+3. **Phase 3** — Full apply: Vault engines (KV, PKI, database), auth methods, VSO CRDs, Flask image build and deploy, HTTPS NodePort.
+
+---
 
 ## Endpoints
 
-| Endpoint | HTTP | HTTPS |
-|---|---|---|
-| Vault UI | http://localhost:8080/ui/ (token: `root`) | — |
-| KV secret | http://localhost:8080/secret | https://localhost:8443/secret |
-| Dynamic DB creds | http://localhost:8080/dynamic-secret | https://localhost:8443/dynamic-secret |
+Base URLs: **HTTP** → `http://localhost:8080` · **HTTPS** → `https://localhost:8443`
+
+| Path | Notes |
+|---|---|
+| `/ui/` | Vault UI — token: `root` |
+| `/secret` | KV credentials synced from `secret/example` |
+| `/dynamic-secret` | Ephemeral Postgres credentials from Vault database engine |
+
+Both `/secret` and `/dynamic-secret` are available on HTTP and HTTPS.
+
+---
 
 ## Demo scripts
 
-After setup, use `make` to run the scripted demos:
-
 ```bash
 make demo-rotate-cert          # delete TLS cert → VSO reissues → confirm serial changed
-make demo-update-secret        # update KV in Vault → observe Flask /secret sync in ~10s
+make demo-update-secret        # update KV in Vault → observe Flask sync in ~10s
 make demo-dynamic-creds        # show ephemeral Postgres creds → force rotation → new creds
-make demo-namespace-isolation  # show scoped VaultAuth roles and the flask-app tenant secret
+make demo-namespace-isolation  # compare VaultAuth roles; show flask-app tenant secret
 ```
 
-### Inspect synced secrets manually
+### Inspect synced secrets
 
 ```bash
-# KV secret (static)
+# KV secret
 kubectl get secret k8s-secret-from-vault -o jsonpath='{.data.username}' | base64 --decode
 
 # Dynamic Postgres credentials
@@ -130,37 +148,38 @@ kubectl describe VaultDynamicSecret db-creds
 kubectl describe VaultPKISecret flask-app-cert
 ```
 
-### TLS certificate rotation
+### Force TLS certificate rotation
 
 ```bash
-# View serial of the certificate currently served by the Gateway
-echo | openssl s_client -showcerts -connect 127.0.0.1:8443 2>/dev/null | openssl x509 -noout -serial
+# Current serial
+echo | openssl s_client -showcerts -connect 127.0.0.1:8443 2>/dev/null \
+  | openssl x509 -noout -serial
 
-# Force rotation — VSO immediately requests a new cert from Vault PKI
+# Rotate — VSO reissues within seconds
 kubectl delete secret flask-app-tls
-kubectl get secret flask-app-tls   # recreated within seconds
+kubectl get secret flask-app-tls
 ```
+
+---
 
 ## Troubleshooting
 
 ### Podman machine not rootful
 
-VSO and Kind require rootful Podman. If you see permission errors on cluster creation:
 ```bash
 podman machine stop && podman machine set --rootful && podman machine start
 ```
 
 ### Port already in use (8080, 8443, or 5001)
 
-The Kind cluster maps host ports 8080, 8443, and 5001. If another process holds one:
 ```bash
 lsof -i :8080    # find the conflicting process
 ```
-Alternatively, override the ports in `variables.tf` and update `kind-config.yaml` to match.
+
+Override ports in `variables.tf` and update `kind-config.yaml` to match.
 
 ### Phase 2 timeout — Vault not reachable
 
-If `setup.sh` stalls at "Waiting for Vault to be reachable", the Envoy Gateway may not have assigned the HTTP NodePort yet:
 ```bash
 kubectl get svc -n envoy-gateway-system
 kubectl get gateway eg -n default -o yaml
@@ -169,16 +188,21 @@ kubectl logs -n envoy-gateway-system -l control-plane=envoy-gateway
 
 ### Vault database connection fails in Phase 3
 
-`vault_database_secret_backend_connection` verifies connectivity to Postgres on creation. If Terraform errors here, Postgres may not have finished starting:
+`vault_database_secret_backend_connection` verifies connectivity to Postgres on creation.
+If Terraform errors here, Postgres may not have finished starting:
+
 ```bash
-kubectl get pod -l app=postgres   # should be Running 1/1
+kubectl get pod -l app=postgres    # should be Running 1/1
 kubectl logs -l app=postgres
 ```
+
 Re-run `terraform apply -auto-approve` once Postgres is ready.
 
-### `db-dynamic-creds` secret missing or `/dynamic-secret` returns 500
+### `/dynamic-secret` returns 500
 
-VSO issues the first dynamic credential set after the `VaultDynamicSecret` CRD is created. Allow ~10s after the Flask app starts, then check:
+VSO issues the first credential set after the `VaultDynamicSecret` CRD is created.
+Allow ~10s after the Flask app starts:
+
 ```bash
 kubectl describe VaultDynamicSecret db-creds
 kubectl get secret db-dynamic-creds
@@ -186,7 +210,7 @@ kubectl get secret db-dynamic-creds
 
 ### `VaultStaticSecret` shows `RolloutRestartTriggeredFailed`
 
-This appears if the first sync races with Flask app startup. It is benign and resolves automatically once the deployment is ready.
+Benign race between first sync and Flask app startup — resolves automatically.
 
 ### HTTPS Gateway not responding
 
@@ -194,8 +218,7 @@ This appears if the first sync races with Flask app startup. It is benign and re
 kubectl get gateway eg -n default -o yaml
 kubectl get httproute -n default
 kubectl logs -n envoy-gateway-system -l control-plane=envoy-gateway
-```
-The HTTPS listener stays degraded until `flask-app-tls` is created by VSO. If the secret exists but HTTPS is still down, describe the VaultPKISecret:
-```bash
 kubectl describe VaultPKISecret flask-app-cert
 ```
+
+The HTTPS listener stays degraded until `flask-app-tls` is created by VSO.

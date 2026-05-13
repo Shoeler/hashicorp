@@ -1,12 +1,19 @@
 SHELL := /bin/bash
 
-.PHONY: setup teardown demo-rotate-cert demo-update-secret demo-dynamic-creds
+.PHONY: setup redeploy-app teardown \
+        demo-rotate-cert demo-update-secret demo-dynamic-creds demo-namespace-isolation
 
 CLUSTER_NAME := vault-demo
 
+# Full cluster teardown + rebuild (destructive — deletes and recreates Kind cluster)
 setup:
 	./setup.sh
 
+# Rebuild and redeploy only the Flask app — leaves cluster and Vault state intact
+redeploy-app:
+	./setup.sh --redeploy-flask
+
+# Delete the Kind cluster
 teardown:
 	kind delete cluster --name $(CLUSTER_NAME)
 
@@ -72,3 +79,21 @@ demo-dynamic-creds:
 	  -o jsonpath='{.data.password}' | base64 --decode)"; \
 	echo ""; \
 	echo "Each issuance creates a unique Postgres role — no shared long-lived passwords."
+
+# Demonstrate namespace isolation: show the flask-app tenant secret and compare auth roles
+demo-namespace-isolation:
+	@echo ""; \
+	echo "==> flask-app namespace VaultAuth (uses flask-app-role — scoped to flask-app/* only):"; \
+	kubectl get vaultauth default -n flask-app \
+	  -o jsonpath='    role: {.spec.kubernetes.role}{"\n"}    serviceAccount: {.spec.kubernetes.serviceAccount}{"\n"}'; \
+	echo ""; \
+	echo "==> default namespace VaultAuth (uses vso-role — access to all engines):"; \
+	kubectl get vaultauth default -n default \
+	  -o jsonpath='    role: {.spec.kubernetes.role}{"\n"}    serviceAccount: {.spec.kubernetes.serviceAccount}{"\n"}'; \
+	echo ""; \
+	echo "==> flask-app-isolated-secret (synced from secret/flask-app/config — flask-app ns only):"; \
+	kubectl get secret flask-app-isolated-secret -n flask-app \
+	  -o jsonpath='{.data}' \
+	  | python3 -c "import sys,json,base64; d=json.load(sys.stdin); [print(f'    {k}: {base64.b64decode(v).decode()}') for k,v in d.items() if k != '_raw']"; \
+	echo ""; \
+	echo "The flask-app-role cannot read secret/example or issue PKI/database creds."

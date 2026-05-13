@@ -197,10 +197,17 @@ done
 if [ "$SUCCESS" = true ]; then
   ok "HTTP endpoint is up"
   echo ""
+  info "GET /secret (HTTP):"
   curl -s http://localhost:8080/secret | jq
   echo ""
-  info "HTTPS response:"
+  info "GET /secret (HTTPS):"
   curl -sk https://localhost:8443/secret | jq
+  echo ""
+  info "GET /dynamic-secret (HTTP):"
+  curl -s http://localhost:8080/dynamic-secret | jq
+  echo ""
+  info "GET /dynamic-secret (HTTPS):"
+  curl -sk https://localhost:8443/dynamic-secret | jq
 else
   err "Failed to reach /secret endpoint via Gateway."
   curl -v http://localhost:8080/secret

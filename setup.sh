@@ -82,10 +82,10 @@ EOF
   ok "Cluster created"
   # Fresh cluster: stale init data is invalid — remove it so Phase 2.5 re-initializes
   rm -f vault-init.json
-  # Fresh cluster means the in-cluster registry is empty. Taint the flask image
-  # resource so it always rebuilds and pushes on this run, regardless of whether
-  # the Dockerfile/app source has changed since the last terraform state update.
+  # Fresh cluster: taint resources that depend on in-cluster state so they always
+  # re-run, regardless of whether their inputs changed since the last state update.
   terraform taint null_resource.flask_image 2>/dev/null || true
+  terraform taint null_resource.seed_postgres 2>/dev/null || true
 
   # 3. Terraform — three phases to handle provider bootstrap ordering:
   #   Phase 1: Helm releases only (installs CRDs; vault provider not invoked)
@@ -227,6 +227,12 @@ fi
 
 if [ "$REDEPLOY_ONLY" == "true" ]; then
   section "Redeploying Flask App"
+  # In standalone mode, terraform needs the root token and mode from vault-init.json
+  if [ -f vault-init.json ]; then
+    export TF_VAR_vault_mode="standalone"
+    export TF_VAR_vault_dev_token=$(python3 -c "import json; print(json.load(open('vault-init.json'))['root_token'])")
+    info "Standalone mode detected — loaded root token from vault-init.json"
+  fi
   terraform apply -auto-approve -target=null_resource.flask_image -target=helm_release.flask_app
   info "Restarting deployment to pick up new image..."
   kubectl rollout restart deployment/flask-app

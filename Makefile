@@ -53,7 +53,10 @@ demo-update-secret:
 	curl -s http://localhost:8080/secret | python3 -m json.tool; \
 	echo ""; \
 	echo "==> Writing new credentials to Vault (username=$$NEW_USER)..."; \
-	kubectl exec vault-0 -- vault kv put secret/example \
+	VAULT_TOKEN=$$([ -f vault-init.json ] \
+	  && python3 -c "import json; print(json.load(open('vault-init.json'))['root_token'])" \
+	  || echo "root"); \
+	kubectl exec vault-0 -- env VAULT_TOKEN=$$VAULT_TOKEN vault kv put secret/example \
 	  username=$$NEW_USER password=$$NEW_PASS; \
 	echo ""; \
 	echo "==> Waiting 12s for VSO to sync (refreshAfter=10s)..."; \

@@ -98,7 +98,7 @@ Reads KV creds as env vars (`SECRET_USERNAME`, `SECRET_PASSWORD`) from `k8s-secr
 
 ## Known quirks
 
-- The Terraform Helm provider does not detect changes to local chart template files on disk — only changes to `values` passed via HCL trigger a `helm upgrade`. When iterating on chart templates outside of `make setup`, run `terraform taint helm_release.flask_app && terraform apply -auto-approve -target=helm_release.flask_app` to force a re-apply.
+- The Terraform Helm provider uses the chart `version` field in `Chart.yaml` to detect upgrades. Bump `flask-app/chart/Chart.yaml` version when changing chart templates, otherwise `terraform apply` will not re-render them.
 
 - `VaultStaticSecret` may show `RolloutRestartTriggeredFailed` on first sync if the `flask-app` deployment isn't ready yet. Benign; resolves automatically.
 - `vault_mount.kvv2` must be imported during Phase 2 (`terraform import vault_mount.kvv2 secret`) because Vault dev mode pre-creates the `secret/` engine. `setup.sh` handles this automatically (skipped in standalone mode).

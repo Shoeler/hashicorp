@@ -18,6 +18,9 @@ spec:
     - path:
         type: PathPrefix
         value: /db-query
+    - path:
+        type: PathPrefix
+        value: /pool-status
     backendRefs:
     - name: {{ .Chart.Name }}
       port: {{ .Values.service.port }}

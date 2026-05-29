@@ -19,13 +19,16 @@ cluster creation — Helm releases, Vault config, VSO CRDs, and the Flask demo a
   │  Envoy Gateway                                   │
   │  :80 (HTTP)   :443 (HTTPS) ◄── flask-app-tls    │
   └──────────────────┬───────────────────────────────┘
-                     │  /secret, /dynamic-secret
+                     │  /secret  /dynamic-secret
+                     │  /db-query  /pool-status
                      ▼
-  ┌──────────────────────────────┐
-  │  Flask App                   │
-  │  GET /secret                 │  ◄── SECRET_USERNAME, SECRET_PASSWORD
-  │  GET /dynamic-secret         │  ◄── DB_USERNAME, DB_PASSWORD
-  └──────────────────────────────┘
+  ┌──────────────────────────────────────────────────┐
+  │  Flask App  (2 replicas, RollingUpdate)          │
+  │  GET /secret          ◄── SECRET_USERNAME        │
+  │  GET /dynamic-secret  ◄── DB_USERNAME            │
+  │  GET /db-query            DB_PASSWORD            │
+  │  GET /pool-status     ◄── ThreadedConnectionPool │
+  └──────────────────────────────────────────────────┘
            ▲ env vars from K8s Secrets
            │
   ┌──────────────────────────────────────────────────┐
@@ -123,16 +126,18 @@ becomes reachable after the Gateway NodePort is created:
 
 ## Endpoints
 
-Base URLs: **HTTP** → `http://localhost:8080` · **HTTPS** → `https://localhost:8443`
+| Path | HTTP | HTTPS | Notes |
+|---|---|---|---|
+| `/ui/` | [http](http://localhost:8080/ui/) | — | Vault UI — token: `root` (dev) or from `vault-init.json` (standalone) |
+| `/secret` | [http](http://localhost:8080/secret) | [https](https://localhost:8443/secret) | KV credentials synced from `secret/example` |
+| `/dynamic-secret` | [http](http://localhost:8080/dynamic-secret) | [https](https://localhost:8443/dynamic-secret) | Ephemeral Postgres credentials (username + password) |
+| `/db-query` | [http](http://localhost:8080/db-query) | [https](https://localhost:8443/db-query) | Live Postgres query via connection pool; `connected_as` shows the active Vault role |
+| `/pool-status` | [http](http://localhost:8080/pool-status) | [https](https://localhost:8443/pool-status) | Per-replica pool stats: pod name, vault role, pool size, queries served since pod start |
 
-| Path | Notes |
-|---|---|
-| `/ui/` | Vault UI — token: `root` |
-| `/secret` | KV credentials synced from `secret/example` |
-| `/dynamic-secret` | Ephemeral Postgres credentials (username + password) |
-| `/db-query` | Live Postgres query using the current Vault-issued credentials |
-
-All Flask endpoints are available on HTTP and HTTPS.
+All Flask endpoints are available on HTTP and HTTPS. The app runs as **2 replicas** — hit
+`/pool-status` repeatedly to see requests load-balanced across both pods, both showing the
+same `vault_role`. When VSO rotates credentials it triggers a rolling restart, so at least
+one replica is always serving.
 
 ---
 
@@ -143,6 +148,80 @@ make demo-rotate-cert          # delete TLS cert → VSO reissues → confirm se
 make demo-update-secret        # update KV in Vault → observe Flask sync in ~10s
 make demo-dynamic-creds        # show creds + DB query → rotate → confirm new role in query
 make demo-namespace-isolation  # compare VaultAuth roles; show flask-app tenant secret
+```
+
+### `make demo-rotate-cert`
+
+[HTTP](http://localhost:8080/secret) · [HTTPS](https://localhost:8443/secret)
+
+```
+==> Current TLS certificate serial: serial=02AE2DB8045C856D11E7A915071636C29038F2E4
+
+==> Deleting flask-app-tls — VSO will request a new cert from Vault PKI...
+==> Waiting for VSO to reissue...
+==> New TLS certificate serial:     serial=15FB485F02498EF7480317C156C1C7F6F4F94EE8
+
+Rotation confirmed — serial changed.
+```
+
+### `make demo-update-secret`
+
+[HTTP](http://localhost:8080/secret) · [HTTPS](https://localhost:8443/secret)
+
+```
+==> Current /secret response:
+{ "password": "supersecretpassword", "username": "admin" }
+
+==> Writing new credentials to Vault (username=demo-1779969091)...
+==> Waiting 12s for VSO to sync (refreshAfter=10s)...
+==> Updated /secret response:
+{ "password": "rotated-065131", "username": "demo-1779969091" }
+```
+
+### `make demo-dynamic-creds`
+
+[/dynamic-secret HTTP](http://localhost:8080/dynamic-secret) · [HTTPS](https://localhost:8443/dynamic-secret) · [/db-query HTTP](http://localhost:8080/db-query) · [HTTPS](https://localhost:8443/db-query)
+
+```
+==> K8s Secret 'db-dynamic-creds' (as synced by VSO):
+NAME               CREATED                MANAGED-BY
+db-dynamic-creds   2026-05-28T11:49:27Z   hashicorp-vso
+
+==> Decoded credentials:
+    username: v-kubernet-flask-ap-mnZlYzJgF35S4Lv8MXc4-1779968967
+
+==> Querying Postgres via /db-query (pre-rotation):
+{ "connected_as": "v-kubernet-flask-ap-mnZlYzJgF35S4Lv8MXc4-1779968967", "products": [...] }
+
+==> Forcing rotation — deleting 'db-dynamic-creds'...
+==> New decoded credentials (different Postgres role):
+    username: v-kubernet-flask-ap-3btxtORgIr3Tmv8RDOtj-1779969109
+
+==> Waiting for rollout restart triggered by VSO...
+deployment "flask-app" successfully rolled out
+
+==> Querying Postgres via /db-query (post-rotation — new Vault role):
+{ "connected_as": "v-kubernet-flask-ap-3btxtORgIr3Tmv8RDOtj-1779969109", "products": [...] }
+
+The 'connected_as' field confirms the pod is using the rotated credential.
+```
+
+### `make demo-namespace-isolation`
+
+[Vault UI](http://localhost:8080/ui/)
+
+```
+==> flask-app namespace VaultAuth (uses flask-app-role — scoped to flask-app/* only):
+    role: flask-app-role
+
+==> default namespace VaultAuth (uses vso-role — access to all engines):
+    role: vso-role
+
+==> flask-app-isolated-secret (synced from secret/flask-app/config — flask-app ns only):
+    api_key: demo-api-key-abc123
+    tier: premium
+
+The flask-app-role cannot read secret/example or issue PKI/database creds.
 ```
 
 ### Inspect synced secrets
@@ -224,7 +303,7 @@ kubectl get secret db-dynamic-creds
 ```
 
 If `/db-query` returns a Postgres connection error after rotation, the rollout restart
-may still be in progress. Wait for it to finish:
+may still be in progress:
 
 ```bash
 kubectl rollout status deployment/flask-app

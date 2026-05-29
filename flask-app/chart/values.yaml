@@ -1,4 +1,4 @@
-replicaCount: 1
+replicaCount: 2
 
 image:
   repository: flask-app
@@ -18,3 +18,7 @@ dynamicSecret:
 
 postgres:
   host: postgres.default.svc
+
+db:
+  poolMin: 2
+  poolMax: 10

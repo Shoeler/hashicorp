@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(GIT_EDITOR=true git merge --continue)",
+      "Bash(awk '{print $1, $3}')",
+      "Bash(curl -sv http://localhost:8080/db-query)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8080/db-query)",
+      "Bash(helm get *)",
+      "Bash(helm template *)",
+      "Bash(python3 -c \"import json; print\\(json.load\\(open\\('vault-init.json'\\)\\)['root_token']\\)\")",
+      "Bash(export TF_VAR_vault_dev_token=$\\(python3 -c \"import json; print\\(json.load\\(open\\('vault-init.json'\\)\\)['root_token']\\)\"\\))",
+      "Bash(export TF_VAR_vault_mode=standalone)",
+      "Bash(kubectl delete *)",
+      "Bash(break)",
+      "Bash(make setup *)",
+      "Bash(make redeploy-app *)",
+      "Bash(curl -s http://localhost:8080/pool-status)"
+    ]
+  }
+}

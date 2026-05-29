@@ -6,6 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A local demo environment showing how the Vault Secrets Operator (VSO) syncs secrets and PKI certificates from HashiCorp Vault into Kubernetes. Terraform manages everything after cluster creation — Helm releases, Vault config, VSO CRDs, and the Flask demo app. Designed for M-series Macs with Podman.
 
+## Claude Code settings
+
+`.claude/settings.json` is committed and holds shared project-level tool permissions.
+`.claude/settings.local.json` is git-ignored — put personal or machine-specific overrides there.
+
 ## Commands
 
 **Primary interface — use `make` for everything:**
@@ -94,7 +99,9 @@ Both namespaces have a `VaultConnection` and `VaultAuth` named `default` — Kub
 
 Reads KV creds as env vars (`SECRET_USERNAME`, `SECRET_PASSWORD`) from `k8s-secret-from-vault` and dynamic DB creds (`DB_USERNAME`, `DB_PASSWORD`) from `db-dynamic-creds`. The DB env vars are `optional: true` — the pod starts without them and returns 500 at `/dynamic-secret` until VSO provisions the secret. Both secrets are mounted via `secretKeyRef` in the Helm chart (`flask-app/chart/templates/deployment.yaml`).
 
-`DB_HOST` is a plain env var (value: `postgres.default.svc`) set in the Helm chart. The `/db-query` endpoint uses `DB_USERNAME`/`DB_PASSWORD`/`DB_HOST` to open a psycopg2 connection, runs `SELECT current_user` and `SELECT id, name, description FROM products`, and returns both results — making it unambiguous which Vault-issued role is active. The `products` table is seeded by `null_resource.seed_postgres` in `database.tf` (runs in Phase 3 after Vault verifies the Postgres connection).
+`DB_HOST`, `DB_POOL_MIN`, and `DB_POOL_MAX` are plain env vars set in the Helm chart. The Flask app maintains a `psycopg2.pool.ThreadedConnectionPool` per pod, initialised lazily on the first request using the credentials present at pod startup. Because VSO triggers a rollout restart on rotation, each pod always starts with a fresh pool bound to the current Vault lease. The `/db-query` endpoint borrows a connection from the pool, runs `SELECT current_user` and `SELECT id, name, description FROM products`, and returns both results. The `/pool-status` endpoint exposes pool size, available connections, a `queries_served` counter (incremented on every successful `/db-query`, resets to 0 when the pod restarts after rotation), the active Vault role, and the pod name (injected via the downward API). `connections_in_use` is not shown — connections are borrowed and returned within a single request so the count is always 0 at response time. The `products` table is seeded by `null_resource.seed_postgres` in `database.tf` (runs in Phase 3 after Vault verifies the Postgres connection).
+
+The app runs as **2 replicas** by default (`values.yaml`). With `maxSurge: 1, maxUnavailable: 0` the rolling restart keeps at least one pod serving traffic while credentials are rotated.
 
 ## Known quirks
 
@@ -102,7 +109,7 @@ Reads KV creds as env vars (`SECRET_USERNAME`, `SECRET_PASSWORD`) from `k8s-secr
 
 - `VaultStaticSecret` may show `RolloutRestartTriggeredFailed` on first sync if the `flask-app` deployment isn't ready yet. Benign; resolves automatically.
 - `vault_mount.kvv2` must be imported during Phase 2 (`terraform import vault_mount.kvv2 secret`) because Vault dev mode pre-creates the `secret/` engine. `setup.sh` handles this automatically (skipped in standalone mode).
-- `make setup` / `make setup-ha` **delete and recreate the Kind cluster**. All in-cluster Terraform state is invalidated; `setup.sh` taints `null_resource.flask_image` to force an image rebuild, and removes any stale `vault-init.json`.
+- `make setup` / `make setup-ha` **delete and recreate the Kind cluster**. All in-cluster Terraform state is invalidated; `setup.sh` taints `null_resource.flask_image` and `null_resource.seed_postgres` to force a rebuild and re-seed, and removes any stale `vault-init.json`.
 - `/dynamic-secret` returns 500 for a few seconds after first deploy while VSO provisions `db-dynamic-creds`. The `optional: true` secretKeyRef prevents CrashLoopBackOff.
 - In standalone mode, `vault-init.json` is written by `setup.sh` and is git-ignored. It contains the unseal key and root token. Do not delete it while the cluster is running — `make setup-ha` on an already-initialized cluster reads it to re-unseal.
 
@@ -117,4 +124,6 @@ Reads KV creds as env vars (`SECRET_USERNAME`, `SECRET_PASSWORD`) from `k8s-secr
 | Flask — dynamic creds (HTTPS) | https://localhost:8443/dynamic-secret | self-signed |
 | Flask — DB query (HTTP) | http://localhost:8080/db-query | — |
 | Flask — DB query (HTTPS) | https://localhost:8443/db-query | self-signed |
+| Flask — pool status (HTTP) | http://localhost:8080/pool-status | — |
+| Flask — pool status (HTTPS) | https://localhost:8443/pool-status | self-signed |
 | Container registry | localhost:5001 | — |

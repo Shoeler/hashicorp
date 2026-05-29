@@ -47,5 +47,5 @@ demo_steps.md
 # Vault standalone init output — contains unseal key and root token
 vault-init.json
 
-# Claude Code project data
-.claude/
+# Claude Code — local-only settings (contains personal permissions; not shared)
+.claude/settings.local.json

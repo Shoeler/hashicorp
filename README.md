@@ -177,6 +177,149 @@ kubectl get secret flask-app-tls
 
 ---
 
+## Attaching a Vault Agent Running on the Host (macOS)
+
+You can run a [Vault Agent](https://developer.hashicorp.com/vault/docs/agent-and-proxy/agent) directly on your Mac — outside the Kind cluster — that authenticates to the same Vault instance the cluster uses. The agent reaches Vault through the Gateway's HTTP listener (`http://localhost:8080`), the same address the Vault UI uses.
+
+The root token isn't appropriate to hand to a host process, so the agent authenticates using [AppRole](https://developer.hashicorp.com/vault/docs/auth/approle) instead.
+
+### Install the Vault CLI/Agent binary
+
+```bash
+brew install vault
+```
+
+### Create an AppRole for the agent
+
+Point the CLI at the local Vault instance and authenticate with an admin token. For `make setup` (dev mode) that's the hardcoded dev token; for `make setup-ha` (standalone mode) pull `root_token` out of `vault-init.json`:
+
+```bash
+export VAULT_ADDR=http://localhost:8080
+
+# dev mode
+export VAULT_TOKEN=root
+
+# standalone mode instead
+export VAULT_TOKEN=$(python3 -c "import json; print(json.load(open('vault-init.json'))['root_token'])")
+```
+
+Enable the AppRole auth method (skip if already enabled):
+
+```bash
+vault auth enable approle
+```
+
+Create a policy granting the agent whatever access it needs — this example allows read access to the same KV secrets the Flask app uses:
+
+```bash
+vault policy write host-agent-policy - <<EOF
+path "secret/data/*" {
+  capabilities = ["read"]
+}
+path "secret/metadata/*" {
+  capabilities = ["list"]
+}
+EOF
+```
+
+Create an AppRole role bound to that policy:
+
+```bash
+vault write auth/approle/role/host-agent \
+    token_policies="host-agent-policy" \
+    token_ttl=1h \
+    token_max_ttl=4h \
+    secret_id_ttl=24h \
+    secret_id_num_uses=0
+```
+
+Fetch the Role ID and generate a Secret ID, saving each to a file the agent will read on the host:
+
+```bash
+vault read -field=role_id auth/approle/role/host-agent/role-id > ~/.vault-role-id
+vault write -field=secret_id -f auth/approle/role/host-agent/secret-id > ~/.vault-secret-id
+chmod 600 ~/.vault-role-id ~/.vault-secret-id
+```
+
+`secret_id` is a credential — treat `~/.vault-secret-id` like a password. `role_id` is less sensitive but still shouldn't be made public.
+
+> In dev mode, storage is in-memory, so every `make setup` run wipes Vault clean and you'll need to re-run this section after each redeploy. In standalone mode (`make setup-ha`), Raft storage persists across pod restarts, but `make teardown` still destroys the cluster and the AppRole with it. Either way, for anything beyond a one-off demo, codify this in `vault.tf` alongside `vault_kubernetes_auth_backend_role.vso_role`, using `vault_auth_backend`, `vault_policy`, and `vault_approle_auth_backend_role` resources.
+
+### Write the Vault Agent config
+
+Create `vault-agent.hcl` on the host (replace `/Users/youruser` with your home directory):
+
+```hcl
+vault {
+  address = "http://127.0.0.1:8080"
+}
+
+auto_auth {
+  method "approle" {
+    mount_path = "auth/approle"
+    config = {
+      role_id_file_path                  = "/Users/youruser/.vault-role-id"
+      secret_id_file_path                = "/Users/youruser/.vault-secret-id"
+      remove_secret_id_file_after_reading = false
+    }
+  }
+
+  sink "file" {
+    config = {
+      path = "/Users/youruser/.vault-token"
+    }
+  }
+}
+
+cache {
+  use_auto_auth_token = true
+}
+
+listener "tcp" {
+  address     = "127.0.0.1:8200"
+  tls_disable = true
+}
+
+template {
+  source      = "/Users/youruser/vault-agent-templates/example.ctmpl"
+  destination = "/Users/youruser/vault-agent-output/example.env"
+}
+```
+
+This config authenticates via AppRole, writes the resulting token to `~/.vault-token`, serves a local Vault-compatible cache/proxy on `127.0.0.1:8200`, and renders the `secret/example` KV secret to a file via `template`.
+
+Create the template referenced above at `vault-agent-templates/example.ctmpl`:
+
+```
+{{- with secret "secret/data/example" }}
+USERNAME={{ .Data.data.username }}
+PASSWORD={{ .Data.data.password }}
+{{- end }}
+```
+
+### Run the agent
+
+```bash
+mkdir -p ~/vault-agent-templates ~/vault-agent-output
+vault agent -config=vault-agent.hcl
+```
+
+In another terminal, confirm it authenticated and rendered the template:
+
+```bash
+cat ~/.vault-token
+cat ~/vault-agent-output/example.env
+```
+
+You can also point any Vault-aware client at the agent's local listener instead of Vault directly:
+
+```bash
+export VAULT_ADDR=http://127.0.0.1:8200
+vault kv get secret/example
+```
+
+---
+
 ## Troubleshooting
 
 ### Podman machine not rootful

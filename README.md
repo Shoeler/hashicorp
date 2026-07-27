@@ -119,6 +119,24 @@ becomes reachable after the Gateway NodePort is created:
 
 > **Caution:** `vault-init.json` contains the unseal key and root token — it is git-ignored and should never be committed.
 
+### Logging into Vault
+
+**UI** — open `http://localhost:8080/ui/`. Sign in with method **Token**:
+- `make setup` (dev mode) → token is `root`
+- `make setup-ha` (standalone mode) → token is `root_token` from `vault-init.json`:
+  ```bash
+  python3 -c "import json; print(json.load(open('vault-init.json'))['root_token'])"
+  ```
+
+**CLI** — point the `vault` CLI at the local instance and export the same token:
+```bash
+export VAULT_ADDR=http://localhost:8080
+export VAULT_TOKEN=root   # or the root_token from vault-init.json in standalone mode
+vault status
+```
+
+`setup.sh` prints the correct UI URL, token, and CLI export commands for the mode you ran at the end of every `make setup` / `make setup-ha` run.
+
 ---
 
 ## Endpoints
@@ -127,7 +145,7 @@ Base URLs: **HTTP** → `http://localhost:8080` · **HTTPS** → `https://localh
 
 | Path | Notes |
 |---|---|
-| `/ui/` | Vault UI — token: `root` |
+| `/ui/` | Vault UI — see [Logging into Vault](#logging-into-vault) for credentials |
 | `/secret` | KV credentials synced from `secret/example` |
 | `/dynamic-secret` | Ephemeral Postgres credentials (username + password) |
 | `/db-query` | Live Postgres query using the current Vault-issued credentials |

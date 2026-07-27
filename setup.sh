@@ -283,17 +283,48 @@ else
 fi
 
 # Final summary
+if [ -f vault-init.json ]; then
+  SUMMARY_MODE="standalone"
+  SUMMARY_TOKEN=$(python3 -c "import json; print(json.load(open('vault-init.json'))['root_token'])")
+  SUMMARY_UNSEAL_KEY=$(python3 -c "import json; print(json.load(open('vault-init.json'))['unseal_keys_b64'][0])")
+else
+  SUMMARY_MODE="dev"
+  SUMMARY_TOKEN="root"
+fi
+
 echo ""
 hr
 echo -e "${BOLD}${GREEN}  Setup complete!${NC}"
 hr
 echo ""
 echo -e "  ${BOLD}Cluster:${NC}    kubectl --context kind-${CLUSTER_NAME}"
-echo -e "  ${BOLD}Vault UI:${NC}   http://localhost:8080/ui/  (token: root)"
+echo -e "  ${BOLD}Vault UI:${NC}   http://localhost:8080/ui/"
+echo -e "  ${BOLD}Vault Token:${NC} ${SUMMARY_TOKEN}"
+if [ "$SUMMARY_MODE" == "standalone" ]; then
+  echo -e "              (standalone mode — generated on init, saved in vault-init.json)"
+fi
 echo -e "  ${BOLD}Flask App:${NC}  http://localhost:8080/secret"
 echo -e "              https://localhost:8443/secret"
 echo -e "              http://localhost:8080/dynamic-secret"
 echo ""
+hr
+echo -e "  ${BOLD}Vault CLI access${NC}"
+hr
+echo ""
+echo -e "    export VAULT_ADDR=http://localhost:8080"
+echo -e "    export VAULT_TOKEN=${SUMMARY_TOKEN}"
+echo -e "    vault status"
+echo ""
+if [ "$SUMMARY_MODE" == "standalone" ]; then
+  echo -e "  ${YELLOW}Note:${NC} standalone mode uses Raft storage — Vault will be sealed again"
+  echo -e "  if vault-0 restarts. Unseal with:"
+  echo ""
+  echo -e "    kubectl exec vault-0 -- vault operator unseal ${SUMMARY_UNSEAL_KEY}"
+  echo ""
+  echo -e "  Root token and unseal key are saved in ${BOLD}vault-init.json${NC} (git-ignored)."
+  echo -e "  Do not delete this file while the cluster is running."
+  echo ""
+fi
 hr
 echo -e "  ${BOLD}Demo scripts (run from project root)${NC}"
 hr

@@ -4,7 +4,7 @@ resource "helm_release" "vault" {
   name       = "vault"
   repository = "https://helm.releases.hashicorp.com"
   chart      = "vault"
-  version    = "0.32.0"
+  version    = "0.34.0"
 
   values = var.vault_mode == "standalone" ? [file("${path.module}/vault-standalone-values.yaml")] : []
 
@@ -76,7 +76,7 @@ resource "vault_pki_secret_backend_role" "role" {
   allowed_domains    = ["example.com", "flask-app.default.svc"]
   allow_subdomains   = true
   allow_bare_domains = true
-  max_ttl            = "72h"
+  max_ttl            = "259200" # 72h, expressed in seconds — Vault 2.0's PKI role read API returns max_ttl as raw seconds, and the provider doesn't normalize "72h" against it, causing perpetual plan drift
 }
 
 # Enable Kubernetes Auth

@@ -1,0 +1,20 @@
+# gitleaks config for the VSO demo repo.
+# The demo intentionally hardcodes a few placeholder credentials for the local
+# Kind cluster (Vault dev root token, example KV values, local Postgres).
+# Allowlist those so the pre-commit hook only blocks real secrets.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Intentional demo placeholders and test fixtures"
+paths = [
+  '''flask-app/tests/.*''',
+]
+regexes = [
+  '''supersecretpassword''',
+  '''demo-api-key-abc123''',
+  '''postgres:postgres@''',
+  '''devRootToken=root''',
+  '''v-k8s-role-abc123''',
+]

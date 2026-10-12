@@ -49,3 +49,15 @@ vault-init.json
 
 # Claude Code project data
 .claude/
+# Secrets / local credentials (added 2026-10-12 after secret audit)
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+kubeconfig*
+*.kubeconfig
+credentials.tfrc.json
+*.swo
+*~

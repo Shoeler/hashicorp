@@ -77,6 +77,7 @@ Built for M-series Macs with Podman. Install before running setup:
 - **kubectl** — `brew install kubectl`
 - **Helm** — `brew install helm`
 - **tfenv** — `brew install tfenv` then `tfenv install && tfenv use` in the project root
+- **gitleaks** *(contributors only)* — `brew install gitleaks` then `make install-hooks` to scan every commit for secrets before it lands
 
 ---
 

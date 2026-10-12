@@ -1,9 +1,14 @@
 SHELL := /bin/bash
 
-.PHONY: setup setup-ha redeploy-app teardown \
+.PHONY: setup setup-ha redeploy-app teardown install-hooks \
         demo-rotate-cert demo-update-secret demo-dynamic-creds demo-namespace-isolation
 
 CLUSTER_NAME := vault-demo
+
+# Point git at the repo's hooks so gitleaks scans every commit for secrets (requires: brew install gitleaks)
+install-hooks:
+	git config core.hooksPath scripts/git-hooks
+	@echo "pre-commit secret scanning enabled (scripts/git-hooks)"
 
 # Full cluster teardown + rebuild — Vault in dev mode (ephemeral, pre-initialized, token=root)
 setup:

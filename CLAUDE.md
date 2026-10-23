@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-A local demo environment showing how the Vault Secrets Operator (VSO) syncs secrets and PKI certificates from HashiCorp Vault into Kubernetes. Terraform manages everything after cluster creation — Helm releases, Vault config, VSO CRDs, and the Flask demo app. Designed for M-series Macs with Podman.
+A local demo environment showing how the Vault Secrets Operator (VSO) syncs secrets and PKI certificates from HashiCorp Vault into Kubernetes. Terraform manages everything after cluster creation — Helm releases, Vault config, VSO CRDs, and the Flask demo app. Designed for M-series Macs with Podman; also runs on Windows via WSL2 (Docker or rootless Podman).
 
 ## Commands
 
@@ -18,6 +18,7 @@ make demo-rotate-cert          # delete TLS cert, watch VSO reissue, compare ser
 make demo-update-secret        # write new KV secret to Vault, observe Flask sync in ~10s
 make demo-dynamic-creds        # show creds + DB query, force rotation, confirm new role in query
 make demo-namespace-isolation  # show scoped VaultAuth roles and flask-app tenant secret
+make test                      # run Flask app unit tests (python3 -m pytest)
 ```
 
 **Flask app unit tests:**
@@ -57,6 +58,12 @@ Terraform can't run a single `apply` because the Vault provider needs Vault to b
 2. **Phase 2** — Creates the HTTP NodePort service and the `vault` HTTPRoute, making Vault reachable at `http://localhost:8080`.
 3. **Phase 2.5** *(standalone mode only)* — `kubectl exec vault-0 -- vault operator init` (saves to `vault-init.json`) + `vault operator unseal`. Exports `TF_VAR_vault_dev_token` so the Vault provider uses the generated root token.
 4. **Phase 3** — Full `terraform apply`. Vault provider can now connect; configures KV/PKI/database engines, auth methods and policies, all VSO CRDs, builds and deploys the Flask app, creates the HTTPS NodePort after VSO provisions the TLS cert. In dev mode, also imports `vault_mount.kvv2` — Vault dev mode pre-creates the `secret/` mount, so Terraform must import it rather than create it. The import refreshes data sources, so `setup.sh` runs it with `VAULT_DEMO_SKIP_HTTPS_PROBE=1`, which makes `data.external.envoy_https_port` return immediately instead of polling five minutes for a TLS cert that cannot exist yet (on a fresh state the poll would time out, the import would silently fail, and Phase 3 would then die with "path is already in use at secret/").
+
+### Container runtime
+
+`scripts/container-runtime.sh` picks the container CLI: `CONTAINER_RUNTIME` (podman|docker) if set, else podman if `podman info` works, else docker if `docker info` works. `setup.sh` calls it in "Checking prerequisites" and `make teardown` calls it so Kind targets the provider that created the cluster. `KIND_EXPERIMENTAL_PROVIDER=podman` is exported only for podman (on WSL both CLIs usually exist and Kind would otherwise default to docker). The choice is exported as `TF_VAR_container_runtime` → `var.container_runtime` (default `podman`) → `local.flask_image_build_command` in `app.tf`, which selects `podman build/push --tls-verify=false` or `docker build/push`. `scripts/install-prereqs-wsl.sh` installs kind/kubectl/helm/jq on WSL2.
+
+`setup.sh` also refuses to run if a directory named after a Helm chart (`vault`, `vault-secrets-operator`, ...) exists in the project root without a `Chart.yaml` — Helm resolves chart names to local paths first, and such a directory produces `could not download chart: Chart.yaml file is missing`.
 
 ### VSO resource dependency chain
 
@@ -101,7 +108,6 @@ Reads KV creds as env vars (`SECRET_USERNAME`, `SECRET_PASSWORD`) from `k8s-secr
 - The Terraform Helm provider uses the chart `version` field in `Chart.yaml` to detect upgrades. Bump `flask-app/chart/Chart.yaml` version when changing chart templates, otherwise `terraform apply` will not re-render them.
 
 - `VaultStaticSecret` may show `RolloutRestartTriggeredFailed` on first sync if the `flask-app` deployment isn't ready yet. Benign; resolves automatically.
-- `setup.sh` refuses to run if a directory named after a Helm chart (`vault`, `vault-secrets-operator`, ...) exists in the project root without a `Chart.yaml` — Helm resolves chart names to local paths first, and such a directory produces `could not download chart: Chart.yaml file is missing`.
 - `vault_mount.kvv2` must be imported during Phase 2 (`terraform import vault_mount.kvv2 secret`) because Vault dev mode pre-creates the `secret/` engine. `setup.sh` handles this automatically (skipped in standalone mode).
 - `make setup` / `make setup-ha` **delete and recreate the Kind cluster**. All in-cluster Terraform state is invalidated; `setup.sh` taints `null_resource.flask_image` to force an image rebuild, and removes any stale `vault-init.json`.
 - `/dynamic-secret` returns 500 for a few seconds after first deploy while VSO provisions `db-dynamic-creds`. The `optional: true` secretKeyRef prevents CrashLoopBackOff.

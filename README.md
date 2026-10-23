@@ -79,6 +79,24 @@ Built for M-series Macs with Podman. Install before running setup:
 - **tfenv** — `brew install tfenv` then `tfenv install && tfenv use` in the project root
 - **gitleaks** *(contributors only)* — `brew install gitleaks` then `make install-hooks` to scan every commit for secrets before it lands
 
+### Windows (WSL2)
+
+Also runs from an Ubuntu shell under WSL2, using Docker or rootless Podman:
+
+- **Clone into the WSL filesystem** (e.g. `~/projects`), not `/mnt/c` — the Windows mount is slow and can break Kind's bind mounts.
+- **CLI tools** — `scripts/install-prereqs-wsl.sh` installs kind, kubectl, helm, and jq into `~/.local/bin` (no sudo). It skips tools already on `PATH` (`FORCE=1` to reinstall) and finishes with a status check of your container runtime.
+- **Container runtime** — either native Docker (`sudo usermod -aG docker $USER`, then re-open your shell) or Docker Desktop with **Settings > Resources > WSL integration** enabled for your distro. Rootless Podman also works.
+- **tfenv** — install [tfenv](https://github.com/tfutils/tfenv) then `tfenv install && tfenv use` in the project root. `tfenv install` needs `unzip` (`sudo apt-get install -y unzip`), which minimal WSL images lack.
+- **python3** — preinstalled on Ubuntu; `setup.sh` uses it to parse JSON (jq is optional)
+
+`setup.sh` uses the first runtime that actually works (`podman info`, then `docker info`) and builds the Flask image with the same CLI. Force one with:
+
+```bash
+CONTAINER_RUNTIME=docker make setup
+```
+
+WSL2 forwards `localhost`, so the access URLs (`http://localhost:8080`, `https://localhost:8443`) work from a Windows browser as well.
+
 ---
 
 ## Quick Start
@@ -93,6 +111,12 @@ Rebuild and redeploy only the Flask app without touching the cluster:
 
 ```bash
 make redeploy-app
+```
+
+Run the Flask app unit tests (requires `pytest`):
+
+```bash
+make test
 ```
 
 ---
@@ -346,6 +370,28 @@ vault kv get secret/example
 ```bash
 podman machine stop && podman machine set --rootful && podman machine start
 ```
+
+### `permission denied` on `/var/run/docker.sock` (WSL2)
+
+Your user can't reach the Docker daemon, so `setup.sh` finds no usable runtime. Either join the `docker` group:
+
+```bash
+sudo usermod -aG docker $USER    # then close and re-open your shell
+docker info                      # should succeed without sudo
+```
+
+or enable Docker Desktop's **Settings > Resources > WSL integration** for your distro.
+
+### Podman detected but you want Docker
+
+`setup.sh` prefers Podman whenever `podman info` succeeds. Override it for a run:
+
+```bash
+CONTAINER_RUNTIME=docker make setup
+CONTAINER_RUNTIME=docker make redeploy-app
+```
+
+Use the same runtime for `make redeploy-app` and `make teardown` as for `make setup` — Kind clusters are tied to the runtime that created them. `scripts/container-runtime.sh` prints the runtime the project will pick.
 
 ### `could not download chart: Chart.yaml file is missing`
 

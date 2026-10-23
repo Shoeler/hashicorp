@@ -20,8 +20,32 @@ waiting() { echo -e "    ${YELLOW}..${NC} $*"; }
 err()     { echo -e "\n    ${RED}✗ Error:${NC} $*" >&2; }
 hr()      { echo -e "${BLUE}────────────────────────────────────────────────────────────${NC}"; }
 
+# Pretty-print JSON from stdin: jq if available, otherwise python3's json.tool.
+# Never fails the script (set -e) on non-JSON input — falls back to raw output.
+pretty_json() {
+  local input
+  input=$(cat)
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s\n' "$input" | jq . 2>/dev/null || printf '%s\n' "$input"
+  else
+    printf '%s\n' "$input" | python3 -m json.tool 2>/dev/null || printf '%s\n' "$input"
+  fi
+}
+
+detect_platform() {
+  if [ "$(uname -s)" == "Darwin" ]; then
+    echo "macos"
+  elif grep -qi microsoft /proc/version 2>/dev/null || uname -r | grep -qi microsoft; then
+    echo "wsl"
+  else
+    echo "linux"
+  fi
+}
+
 hr
 echo -e "${BOLD}  Vault Demo Setup${NC}"
+PLATFORM=$(detect_platform)
+echo -e "  Platform: ${PLATFORM}"
 hr
 
 for arg in "$@"; do
@@ -51,13 +75,65 @@ for cmd in kind kubectl helm terraform; do
   ok "$cmd"
 done
 
-if command -v podman >/dev/null 2>&1; then
-  ok "podman (configuring Kind to use it)"
+if command -v jq >/dev/null 2>&1; then
+  ok "jq"
+else
+  info "jq not found (optional) — using python3 -m json.tool for JSON output"
+fi
+
+# Container runtime: CONTAINER_RUNTIME override, else the first working CLI (podman, then docker)
+if [ -n "${CONTAINER_RUNTIME:-}" ]; then
+  case "$CONTAINER_RUNTIME" in
+    podman|docker) ;;
+    *) err "CONTAINER_RUNTIME must be 'podman' or 'docker' (got '$CONTAINER_RUNTIME')."; exit 1 ;;
+  esac
+  command -v "$CONTAINER_RUNTIME" >/dev/null 2>&1 || { err "CONTAINER_RUNTIME=$CONTAINER_RUNTIME but $CONTAINER_RUNTIME is not installed."; exit 1; }
+  RUNTIME="$CONTAINER_RUNTIME"
+  RUNTIME_SOURCE="CONTAINER_RUNTIME override"
+elif RUNTIME=$(scripts/container-runtime.sh); then
+  RUNTIME_SOURCE="auto-detected"
+else
+  err "no usable container runtime found (need a working podman or docker)."
+  if command -v podman >/dev/null 2>&1; then
+    info "podman is installed but 'podman info' failed — is the podman machine running?"
+  fi
+  if command -v docker >/dev/null 2>&1; then
+    info "docker is installed but 'docker info' failed — is the daemon running and accessible?"
+  fi
+  if [ "$PLATFORM" == "wsl" ]; then
+    info "WSL2: add yourself to the docker group: sudo usermod -aG docker \$USER (then re-open your shell),"
+    info "      or enable Docker Desktop > Settings > Resources > WSL integration for this distro,"
+    info "      or install rootless podman. See scripts/install-prereqs-wsl.sh."
+  fi
+  exit 1
+fi
+
+if [ "$RUNTIME" == "podman" ]; then
+  if [ "$RUNTIME_SOURCE" == "auto-detected" ]; then
+    ok "podman (configuring Kind to use it)"
+  else
+    ok "container runtime: podman (${RUNTIME_SOURCE}) — configuring Kind to use it"
+  fi
   export KIND_EXPERIMENTAL_PROVIDER=podman
 else
-  command -v docker >/dev/null 2>&1 || { err "neither podman nor docker found."; exit 1; }
-  ok "docker"
+  if [ "$RUNTIME_SOURCE" == "auto-detected" ]; then
+    ok "docker"
+  else
+    ok "container runtime: docker (${RUNTIME_SOURCE})"
+  fi
 fi
+# Terraform builds/pushes the Flask image with the same CLI (see app.tf)
+export TF_VAR_container_runtime="$RUNTIME"
+
+# Helm resolves a chart name to a local path first. A stray directory in the project root
+# named after a chart (e.g. ./vault left behind by an old data dir) shadows the real chart
+# and fails with "could not download chart: Chart.yaml file is missing".
+for chart in vault vault-secrets-operator docker-registry gateway-helm; do
+  if [ -d "$chart" ] && [ ! -f "$chart/Chart.yaml" ]; then
+    err "./$chart exists and shadows the Helm chart '$chart'. Move or delete it, then re-run."
+    exit 1
+  fi
+done
 
 if [ "$REDEPLOY_ONLY" == "false" ]; then
 
@@ -179,7 +255,8 @@ EOF
   section "Importing existing Vault state"
   if [ "$VAULT_MODE" == "dev" ] && ! terraform state list | grep -q "vault_mount.kvv2"; then
     info "Importing existing 'secret' mount (Vault Dev Mode pre-creates it)..."
-    terraform import vault_mount.kvv2 secret || true
+    # The import refreshes data sources; skip the HTTPS port poll (cert can't exist yet).
+    VAULT_DEMO_SKIP_HTTPS_PROBE=1 terraform import vault_mount.kvv2 secret || true
   elif [ "$VAULT_MODE" == "dev" ]; then
     info "Secret mount already in state — skipping import."
   fi
@@ -264,16 +341,16 @@ if [ "$SUCCESS" = true ]; then
   ok "HTTP endpoint is up"
   echo ""
   info "GET /secret (HTTP):"
-  curl -s http://localhost:8080/secret | jq
+  curl -s http://localhost:8080/secret | pretty_json
   echo ""
   info "GET /secret (HTTPS):"
-  curl -sk https://localhost:8443/secret | jq
+  curl -sk https://localhost:8443/secret | pretty_json
   echo ""
   info "GET /dynamic-secret (HTTP):"
-  curl -s http://localhost:8080/dynamic-secret | jq
+  curl -s http://localhost:8080/dynamic-secret | pretty_json
   echo ""
   info "GET /dynamic-secret (HTTPS):"
-  curl -sk https://localhost:8443/dynamic-secret | jq
+  curl -sk https://localhost:8443/dynamic-secret | pretty_json
 else
   err "Failed to reach /secret endpoint via Gateway."
   curl -v http://localhost:8080/secret

@@ -56,3 +56,14 @@ variable "flask_image_tag" {
   type        = string
   default     = "latest"
 }
+
+variable "container_runtime" {
+  description = "Container CLI used to build and push the Flask image: 'podman' or 'docker' (setup.sh sets TF_VAR_container_runtime from its runtime detection)"
+  type        = string
+  default     = "podman"
+
+  validation {
+    condition     = contains(["podman", "docker"], var.container_runtime)
+    error_message = "container_runtime must be 'podman' or 'docker'."
+  }
+}

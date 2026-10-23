@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: setup setup-ha redeploy-app teardown install-hooks \
+.PHONY: setup setup-ha redeploy-app teardown install-hooks test \
         demo-rotate-cert demo-update-secret demo-dynamic-creds demo-namespace-isolation
 
 CLUSTER_NAME := vault-demo
@@ -23,8 +23,14 @@ setup-ha:
 redeploy-app:
 	./setup.sh --redeploy-flask
 
-# Delete the Kind cluster
+# Run the Flask app unit tests (requires: pip install pytest)
+test:
+	cd flask-app && python3 -m pytest tests/
+
+# Delete the Kind cluster (same runtime detection as setup.sh, so Kind targets the right provider)
 teardown:
+	@RUNTIME=$$(scripts/container-runtime.sh || true); \
+	[ "$$RUNTIME" = "podman" ] && export KIND_EXPERIMENTAL_PROVIDER=podman; \
 	kind delete cluster --name $(CLUSTER_NAME)
 
 # Show current TLS cert serial, force VSO to reissue from Vault, confirm serial changed

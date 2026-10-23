@@ -1,3 +1,14 @@
+# Image build/push command for the selected container runtime (var.container_runtime,
+# exported by setup.sh as TF_VAR_container_runtime). The podman command is unchanged.
+# Docker treats 127.0.0.0/8 registries as insecure automatically, so no TLS flag is needed.
+locals {
+  flask_image_build_command = (
+    var.container_runtime == "docker"
+    ? "docker build -t localhost:5001/flask-app:${var.flask_image_tag} ${path.module}/flask-app && docker push localhost:5001/flask-app:${var.flask_image_tag}"
+    : "podman build -t localhost:5001/flask-app:${var.flask_image_tag} ${path.module}/flask-app && podman push localhost:5001/flask-app:${var.flask_image_tag} --tls-verify=false"
+  )
+}
+
 # Build and push the Flask app image before deploying.
 # Triggers re-build when Dockerfile or app source changes.
 resource "null_resource" "flask_image" {
@@ -7,7 +18,7 @@ resource "null_resource" "flask_image" {
   }
 
   provisioner "local-exec" {
-    command = "podman build -t localhost:5001/flask-app:${var.flask_image_tag} ${path.module}/flask-app && podman push localhost:5001/flask-app:${var.flask_image_tag} --tls-verify=false"
+    command = local.flask_image_build_command
   }
 
   depends_on = [helm_release.registry]

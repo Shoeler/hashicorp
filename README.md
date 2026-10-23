@@ -347,6 +347,10 @@ vault kv get secret/example
 podman machine stop && podman machine set --rootful && podman machine start
 ```
 
+### `could not download chart: Chart.yaml file is missing`
+
+Helm resolves a chart name to a local path before it looks in the repository. A stray directory in the project root named after a chart (for example a leftover `./vault/` data directory) shadows the real chart. `setup.sh` checks for this and tells you which directory to move or delete.
+
 ### Port already in use (8080, 8443, or 5001)
 
 ```bash

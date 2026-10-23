@@ -59,6 +59,16 @@ else
   ok "docker"
 fi
 
+# Helm resolves a chart name to a local path first. A stray directory in the project root
+# named after a chart (e.g. ./vault left behind by an old data dir) shadows the real chart
+# and fails with "could not download chart: Chart.yaml file is missing".
+for chart in vault vault-secrets-operator docker-registry gateway-helm; do
+  if [ -d "$chart" ] && [ ! -f "$chart/Chart.yaml" ]; then
+    err "./$chart exists and shadows the Helm chart '$chart'. Move or delete it, then re-run."
+    exit 1
+  fi
+done
+
 if [ "$REDEPLOY_ONLY" == "false" ]; then
 
   # 2. Create Kind cluster
@@ -179,7 +189,8 @@ EOF
   section "Importing existing Vault state"
   if [ "$VAULT_MODE" == "dev" ] && ! terraform state list | grep -q "vault_mount.kvv2"; then
     info "Importing existing 'secret' mount (Vault Dev Mode pre-creates it)..."
-    terraform import vault_mount.kvv2 secret || true
+    # The import refreshes data sources; skip the HTTPS port poll (cert can't exist yet).
+    VAULT_DEMO_SKIP_HTTPS_PROBE=1 terraform import vault_mount.kvv2 secret || true
   elif [ "$VAULT_MODE" == "dev" ]; then
     info "Secret mount already in state — skipping import."
   fi

@@ -177,6 +177,13 @@ resource "kubernetes_service" "gateway_nodeports_http" {
 data "external" "envoy_https_port" {
   program = [
     "bash", "-c", <<-SCRIPT
+      # setup.sh sets this while running `terraform import` on a fresh state: the import
+      # refreshes this data source before the TLS cert can exist, so polling would only
+      # time out. The real poll runs during the Phase 3 apply.
+      if [ -n "$VAULT_DEMO_SKIP_HTTPS_PROBE" ]; then
+        echo "{\"port\": \"443\"}"
+        exit 0
+      fi
       RETRIES=60
       SLEEP=5
       for ((i=1; i<=RETRIES; i++)); do

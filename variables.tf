@@ -27,6 +27,12 @@ variable "vault_mode" {
   }
 }
 
+variable "vault_version" {
+  description = "Vault image tag (hashicorp/vault) for the server and the injector's agent image. Overrides the Helm chart default."
+  type        = string
+  default     = "2.2.2"
+}
+
 variable "vault_dev_token" {
   description = "Root token for Vault (dev mode uses 'root'; standalone mode uses the token from vault operator init)"
   type        = string

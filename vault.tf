@@ -4,9 +4,21 @@ resource "helm_release" "vault" {
   name       = "vault"
   repository = "https://helm.releases.hashicorp.com"
   chart      = "vault"
-  version    = "0.34.0"
+  version    = "0.34.1"
 
   values = var.vault_mode == "standalone" ? [file("${path.module}/vault-standalone-values.yaml")] : []
+
+  # The chart's default Vault image lags the latest release (0.34.1 ships 2.0.4), so the
+  # server and the injector's agent image are pinned explicitly via var.vault_version.
+  set {
+    name  = "server.image.tag"
+    value = var.vault_version
+  }
+
+  set {
+    name  = "injector.agentImage.tag"
+    value = var.vault_version
+  }
 
   dynamic "set" {
     for_each = var.vault_mode == "dev" ? ["enabled"] : []

@@ -107,6 +107,7 @@ Reads KV creds as env vars (`SECRET_USERNAME`, `SECRET_PASSWORD`) from `k8s-secr
 
 - The Terraform Helm provider uses the chart `version` field in `Chart.yaml` to detect upgrades. Bump `flask-app/chart/Chart.yaml` version when changing chart templates, otherwise `terraform apply` will not re-render them.
 
+- The Vault version is set by `var.vault_version` (`variables.tf`), not by the Helm chart: the chart's default image lags Vault releases, so `vault.tf` overrides `server.image.tag` and `injector.agentImage.tag`. To try another version: `TF_VAR_vault_version=<tag> make setup`.
 - `VaultStaticSecret` may show `RolloutRestartTriggeredFailed` on first sync if the `flask-app` deployment isn't ready yet. Benign; resolves automatically.
 - `vault_mount.kvv2` must be imported during Phase 2 (`terraform import vault_mount.kvv2 secret`) because Vault dev mode pre-creates the `secret/` engine. `setup.sh` handles this automatically (skipped in standalone mode).
 - `make setup` / `make setup-ha` **delete and recreate the Kind cluster**. All in-cluster Terraform state is invalidated; `setup.sh` taints `null_resource.flask_image` to force an image rebuild, and removes any stale `vault-init.json`.

@@ -14,6 +14,8 @@ make setup                     # full cluster + Terraform apply (~10 min, destru
 make setup-ha                  # same but Vault in standalone mode (Raft, requires init/unseal)
 make redeploy-app              # rebuild Flask image and redeploy only, cluster intact
 make teardown                  # delete the Kind cluster
+make stop                      # stop the Kind node + idle Podman machine; cluster and Vault data kept
+make start                     # start again, unseal Vault (standalone), re-seed Postgres if wiped
 make demo-rotate-cert          # delete TLS cert, watch VSO reissue, compare serials
 make demo-update-secret        # write new KV secret to Vault, observe Flask sync in ~10s
 make demo-dynamic-creds        # show creds + DB query, force rotation, confirm new role in query
@@ -113,6 +115,8 @@ Reads KV creds as env vars (`SECRET_USERNAME`, `SECRET_PASSWORD`) from `k8s-secr
 - `make setup` / `make setup-ha` **delete and recreate the Kind cluster**. All in-cluster Terraform state is invalidated; `setup.sh` taints `null_resource.flask_image` to force an image rebuild, and removes any stale `vault-init.json`.
 - `/dynamic-secret` returns 500 for a few seconds after first deploy while VSO provisions `db-dynamic-creds`. The `optional: true` secretKeyRef prevents CrashLoopBackOff.
 - In standalone mode, `vault-init.json` is written by `setup.sh` and is git-ignored. It contains the unseal key and root token. Do not delete it while the cluster is running — Vault seals again whenever `vault-0` restarts, and the unseal key in this file is the only way to unseal it (`kubectl exec vault-0 -- vault operator unseal <key>`). `make redeploy-app` and the demo targets also read the root token from it. `make setup-ha` always recreates the cluster and writes a fresh file.
+
+- `make stop` / `make start` (`scripts/cluster-power.sh`) pause and resume the cluster without re-initializing Vault. Only standalone mode keeps Vault data (Raft on a PVC inside the Kind node container); dev mode is in-memory and needs `make setup` after a restart. Postgres has no persistent volume, so `make start` detects the missing `products` table, re-runs `null_resource.seed_postgres`, and deletes `db-dynamic-creds` so VSO requests fresh credentials. `make stop` seals Vault first (the Kind node ignores the stop signal and is killed after the runtime's timeout, so sealing is what closes Raft storage cleanly) and leaves the Podman machine running if other containers are up.
 
 ## Access points (post-setup)
 

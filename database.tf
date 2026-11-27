@@ -1,5 +1,23 @@
 # --- PostgreSQL (backing store for dynamic secrets demo) ---
 
+# Postgres data lives on a PersistentVolume so the products table and the roles Vault
+# creates survive pod restarts and `make stop` / `make start`.
+resource "kubernetes_persistent_volume_claim" "postgres" {
+  metadata {
+    name      = "postgres-data"
+    namespace = "default"
+  }
+  spec {
+    access_modes = ["ReadWriteOnce"]
+    resources {
+      requests = { storage = "1Gi" }
+    }
+  }
+  # Kind's default StorageClass binds on first consumer, so the claim stays Pending
+  # until the Postgres pod is scheduled. Waiting here would deadlock the apply.
+  wait_until_bound = false
+}
+
 resource "kubernetes_deployment" "postgres" {
   metadata {
     name      = "postgres"
@@ -8,6 +26,10 @@ resource "kubernetes_deployment" "postgres" {
   }
   spec {
     replicas = 1
+    # The volume is ReadWriteOnce: stop the old pod before starting its replacement.
+    strategy {
+      type = "Recreate"
+    }
     selector {
       match_labels = { app = "postgres" }
     }
@@ -33,6 +55,21 @@ resource "kubernetes_deployment" "postgres" {
           env {
             name  = "POSTGRES_DB"
             value = "app"
+          }
+          # A subdirectory, because the volume root may not be empty (lost+found).
+          env {
+            name  = "PGDATA"
+            value = "/var/lib/postgresql/data/pgdata"
+          }
+          volume_mount {
+            name       = "data"
+            mount_path = "/var/lib/postgresql/data"
+          }
+        }
+        volume {
+          name = "data"
+          persistent_volume_claim {
+            claim_name = kubernetes_persistent_volume_claim.postgres.metadata[0].name
           }
         }
       }

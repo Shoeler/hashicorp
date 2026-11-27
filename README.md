@@ -117,10 +117,10 @@ Pause the cluster and resume it later without re-initializing Vault (standalone 
 
 ```bash
 make stop     # seals Vault, stops the Kind node and, if nothing else is running in it, the Podman machine
-make start    # starts both, unseals Vault with the key in vault-init.json, repairs Postgres
+make start    # starts both, unseals Vault with the key in vault-init.json, checks the endpoints
 ```
 
-Vault's Raft data lives on a volume inside the stopped Kind node container, so secrets, PKI, auth and policies come back as they were. Do not run `make setup`, `make setup-ha` or `make teardown` in between — those delete the cluster. Postgres has no persistent volume, so `make start` re-seeds the `products` table and has VSO request new dynamic credentials. In dev mode (`make setup`) Vault is in-memory and does not survive a stop; run `make setup` again afterwards.
+Vault's Raft data lives on a volume inside the stopped Kind node container, so secrets, PKI, auth and policies come back as they were. Do not run `make setup`, `make setup-ha` or `make teardown` in between — those delete the cluster. Postgres keeps its data on a volume too, so the `products` table and the Vault-issued database roles survive. In dev mode (`make setup`) Vault is in-memory and does not survive a stop; run `make setup` again afterwards.
 
 Run the Flask app unit tests (creates a private `.venv` on first run; needs only `python3`):
 

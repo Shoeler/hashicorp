@@ -48,7 +48,7 @@ stop:
 	@scripts/cluster-power.sh stop
 
 # Start a stopped cluster: starts the Podman machine and Kind node, unseals Vault with the key
-# in vault-init.json, and re-seeds Postgres (which has no persistent volume) if it was wiped.
+# in vault-init.json, and re-seeds Postgres if its products table is missing.
 start:
 	@scripts/cluster-power.sh start
 

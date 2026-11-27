@@ -2,7 +2,7 @@
 # Stop or start the demo cluster without destroying it.
 #
 #   scripts/cluster-power.sh stop    # stop the Kind node (and the Podman machine, if idle)
-#   scripts/cluster-power.sh start   # start it again, unseal Vault, repair Postgres if needed
+#   scripts/cluster-power.sh start   # start it again, unseal Vault, check Postgres
 #
 # Vault data survives only in standalone mode (make setup-ha): it lives on a PersistentVolume
 # inside the Kind node container, and Vault is unsealed again with the key in vault-init.json.
@@ -152,8 +152,9 @@ start() {
   [ "$CODE" = 200 ] || fail "Vault is not reachable at http://localhost:8080 (HTTP $CODE). Check: kubectl --context kind-${CLUSTER_NAME} get pods -n envoy-gateway-system"
   ok "Vault is reachable through the Gateway at http://localhost:8080"
 
-  # Postgres has no persistent volume: a restart wipes the products table and the roles
-  # Vault created. Re-seed it and make VSO request fresh dynamic credentials.
+  # Postgres keeps its data on a PersistentVolume, so this is normally a no-op. Fallback for
+  # clusters created before that volume existed (or a lost volume): the products table and
+  # the roles Vault created are gone, so re-seed and make VSO request fresh credentials.
   TABLE=""
   for i in $(seq 1 30); do
     if TABLE=$(kubectl exec deployment/postgres -- psql -U postgres -d app -tAc \
@@ -164,7 +165,7 @@ start() {
     sleep 2
   done
   if [ -z "$TABLE" ]; then
-    say "Repairing Postgres (its data does not survive a restart)"
+    say "Repairing Postgres (products table is missing)"
     export TF_VAR_vault_mode="standalone"
     export TF_VAR_container_runtime="$RUNTIME"
     TF_VAR_vault_dev_token="$(init_value "d['root_token']")"

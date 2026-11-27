@@ -12,4 +12,3 @@ server:
         path    = "/vault/data"
         node_id = "vault-0"
       }
-      service_registration "kubernetes" {}

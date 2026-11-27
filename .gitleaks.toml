@@ -17,4 +17,5 @@ regexes = [
   '''postgres:postgres@''',
   '''devRootToken=root''',
   '''v-k8s-role-abc123''',
+  '''rotated-\d+''',
 ]

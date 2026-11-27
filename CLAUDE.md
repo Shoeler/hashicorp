@@ -18,14 +18,14 @@ make demo-rotate-cert          # delete TLS cert, watch VSO reissue, compare ser
 make demo-update-secret        # write new KV secret to Vault, observe Flask sync in ~10s
 make demo-dynamic-creds        # show creds + DB query, force rotation, confirm new role in query
 make demo-namespace-isolation  # show scoped VaultAuth roles and flask-app tenant secret
-make test                      # run Flask app unit tests (python3 -m pytest)
+make test                      # run Flask app unit tests in .venv (created on first run)
 ```
 
 **Flask app unit tests:**
 ```bash
-cd flask-app && python -m pytest tests/
+make test
 # run a single test:
-python -m pytest tests/test_app.py::FlaskAppTests::test_get_dynamic_secret_env
+cd flask-app && ../.venv/bin/python -m pytest tests/test_app.py::FlaskAppTests::test_get_dynamic_secret_env
 ```
 
 **Targeted Terraform (iterating on a single resource post-setup):**
@@ -111,7 +111,7 @@ Reads KV creds as env vars (`SECRET_USERNAME`, `SECRET_PASSWORD`) from `k8s-secr
 - `vault_mount.kvv2` must be imported during Phase 2 (`terraform import vault_mount.kvv2 secret`) because Vault dev mode pre-creates the `secret/` engine. `setup.sh` handles this automatically (skipped in standalone mode).
 - `make setup` / `make setup-ha` **delete and recreate the Kind cluster**. All in-cluster Terraform state is invalidated; `setup.sh` taints `null_resource.flask_image` to force an image rebuild, and removes any stale `vault-init.json`.
 - `/dynamic-secret` returns 500 for a few seconds after first deploy while VSO provisions `db-dynamic-creds`. The `optional: true` secretKeyRef prevents CrashLoopBackOff.
-- In standalone mode, `vault-init.json` is written by `setup.sh` and is git-ignored. It contains the unseal key and root token. Do not delete it while the cluster is running — `make setup-ha` on an already-initialized cluster reads it to re-unseal.
+- In standalone mode, `vault-init.json` is written by `setup.sh` and is git-ignored. It contains the unseal key and root token. Do not delete it while the cluster is running — Vault seals again whenever `vault-0` restarts, and the unseal key in this file is the only way to unseal it (`kubectl exec vault-0 -- vault operator unseal <key>`). `make redeploy-app` and the demo targets also read the root token from it. `make setup-ha` always recreates the cluster and writes a fresh file.
 
 ## Access points (post-setup)
 

@@ -86,7 +86,7 @@ start() {
   # when Docker is installed too, answers "docker" — where the node container does not exist.
   RUNTIME=$(scripts/container-runtime.sh) || RUNTIME=""
   if { [ -z "$RUNTIME" ] || ! node_exists "$RUNTIME"; } \
-    && [ -z "${CONTAINER_RUNTIME:-}" ] && podman_machine_exists && ! podman_machine_running; then
+    && [ "${CONTAINER_RUNTIME:-podman}" = "podman" ] && podman_machine_exists && ! podman_machine_running; then
     say "Starting Podman machine"
     podman machine start >/dev/null
     ok "Podman machine started"
@@ -98,9 +98,14 @@ start() {
   node_exists "$RUNTIME" \
     || fail "container $NODE does not exist in $RUNTIME — the cluster was deleted. Run 'make setup-ha' to create it."
 
-  say "Starting Kind node $NODE ($RUNTIME)"
-  "$RUNTIME" start "$NODE" >/dev/null
-  ok "node container started"
+  WAS_RUNNING=$("$RUNTIME" container inspect --format '{{.State.Running}}' "$NODE" 2>/dev/null || echo false)
+  if [ "$WAS_RUNNING" = "true" ]; then
+    say "Kind node $NODE is already running ($RUNTIME)"
+  else
+    say "Starting Kind node $NODE ($RUNTIME)"
+    "$RUNTIME" start "$NODE" >/dev/null
+    ok "node container started"
+  fi
 
   say "Waiting for the Kubernetes API"
   for i in $(seq 1 60); do
@@ -113,8 +118,12 @@ start() {
 
   if [ ! -f vault-init.json ]; then
     echo ""
-    note "No vault-init.json: Vault ran in dev mode (in-memory), so its secrets and config are gone."
-    note "Run 'make setup' (or 'make setup-ha' for a Vault that survives restarts) to rebuild."
+    if [ "$WAS_RUNNING" = "true" ]; then
+      note "No vault-init.json: Vault is in dev mode. The cluster was already running — nothing to do."
+    else
+      note "No vault-init.json: Vault ran in dev mode (in-memory), so its secrets and config are gone."
+      note "Run 'make setup' (or 'make setup-ha' for a Vault that survives restarts) to rebuild."
+    fi
     exit 0
   fi
 

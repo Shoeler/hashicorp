@@ -418,7 +418,7 @@ The Envoy Gateway chart is pulled from Docker Hub (`oci://docker.io/envoyproxy`)
 
 - `exec: "docker-credential-desktop": executable file not found in $PATH` — `~/.docker/config.json` still names Docker Desktop's credential helper, but Docker Desktop is no longer installed. Delete the `"credsStore": "desktop"` line from that file.
 
-Check the fix with `helm pull oci://docker.io/envoyproxy/gateway-helm --version v1.2.0 -d /tmp`, then re-run `make setup`.
+Check the fix with `helm pull oci://docker.io/envoyproxy/gateway-helm --version v1.10.0 -d /tmp`, then re-run `make setup`.
 
 ### Port already in use (8080, 8443, or 5001)
 

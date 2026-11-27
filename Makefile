@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: setup setup-ha redeploy-app teardown install-hooks test \
+.PHONY: setup setup-ha redeploy-app teardown stop start install-hooks test \
         demo-rotate-cert demo-update-secret demo-dynamic-creds demo-namespace-isolation
 
 CLUSTER_NAME := vault-demo
@@ -41,6 +41,16 @@ teardown:
 	@RUNTIME=$$(scripts/container-runtime.sh || true); \
 	[ "$$RUNTIME" = "podman" ] && export KIND_EXPERIMENTAL_PROVIDER=podman; \
 	kind delete cluster --name $(CLUSTER_NAME)
+
+# Stop the cluster without deleting it: stops the Kind node container and, if nothing else
+# is running in it, the Podman machine. Vault data survives in standalone mode (make setup-ha).
+stop:
+	@scripts/cluster-power.sh stop
+
+# Start a stopped cluster: starts the Podman machine and Kind node, unseals Vault with the key
+# in vault-init.json, and re-seeds Postgres (which has no persistent volume) if it was wiped.
+start:
+	@scripts/cluster-power.sh start
 
 # Show current TLS cert serial, force VSO to reissue from Vault, confirm serial changed
 demo-rotate-cert:

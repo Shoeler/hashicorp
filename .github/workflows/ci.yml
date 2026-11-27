@@ -32,7 +32,7 @@ jobs:
       - run: terraform validate
 
   shell:
-    name: Shell script syntax
+    name: Shell script syntax and lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -41,6 +41,8 @@ jobs:
           for f in setup.sh scripts/*.sh scripts/git-hooks/pre-commit; do
             bash -n "$f"
           done
+      - name: shellcheck (warnings and errors)
+        run: shellcheck -S warning setup.sh scripts/*.sh scripts/git-hooks/pre-commit
 
   secrets:
     name: Secret scan (gitleaks)

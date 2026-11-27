@@ -21,15 +21,18 @@ fail() { printf '    [error] %s\n' "$*" >&2; exit 1; }
 
 kubectl() { command kubectl --context "kind-${CLUSTER_NAME}" "$@"; }
 
-# Name of a Podman machine that exists on this host ("" on Linux, where Podman runs natively).
-podman_machine() {
+# "name|running" for the default Podman machine — the one plain `podman machine start/stop`
+# act on. Prints nothing on Linux, where Podman runs natively and there is no machine.
+podman_default_machine() {
   command -v podman >/dev/null 2>&1 || return 0
-  podman machine list --noheading --format '{{.Name}}' 2>/dev/null | head -1 | tr -d '*'
+  podman machine list --noheading --format '{{.Name}}|{{.Default}}|{{.Running}}' 2>/dev/null \
+    | awk -F'|' '$2 == "true" { sub(/\*$/, "", $1); print $1 "|" $3; exit }'
 }
 
-podman_machine_running() {
-  podman machine list --noheading --format '{{.Running}}' 2>/dev/null | head -1 | grep -qi true
-}
+podman_machine_exists()  { [ -n "$(podman_default_machine)" ]; }
+podman_machine_running() { [ "$(podman_default_machine | cut -d'|' -f2)" = "true" ]; }
+
+node_exists() { "$1" container inspect "$NODE" >/dev/null 2>&1; }
 
 init_value() { # init_value <python expression over d>
   python3 -c "import json; d=json.load(open('vault-init.json')); print($1)"
@@ -38,19 +41,31 @@ init_value() { # init_value <python expression over d>
 stop() {
   RUNTIME=$(scripts/container-runtime.sh) || fail "no running container runtime found — nothing to stop."
 
-  "$RUNTIME" container inspect "$NODE" >/dev/null 2>&1 \
-    || fail "container $NODE does not exist. Create the cluster with 'make setup-ha' first."
+  node_exists "$RUNTIME" \
+    || fail "container $NODE does not exist in $RUNTIME. Create the cluster with 'make setup-ha' first."
 
   if [ ! -f vault-init.json ]; then
     note "No vault-init.json: Vault is in dev mode (in-memory). Its data will NOT survive this stop."
     note "After 'make start', run 'make setup' to rebuild it. Use 'make setup-ha' for a Vault that survives."
   fi
 
+  # The Kind node does not exit on the runtime's stop signal; it is killed when the stop
+  # timeout expires. Seal Vault first so it has closed its Raft storage before that happens.
+  if [ -f vault-init.json ]; then
+    say "Sealing Vault"
+    if kubectl exec vault-0 -- env VAULT_TOKEN="$(init_value "d['root_token']")" \
+      vault operator seal >/dev/null 2>&1; then
+      ok "Vault sealed — storage closed cleanly"
+    else
+      note "Could not seal Vault (already sealed or not running) — continuing"
+    fi
+  fi
+
   say "Stopping Kind node $NODE ($RUNTIME)"
   "$RUNTIME" stop "$NODE" >/dev/null
   ok "node stopped — cluster and Vault data are kept inside the stopped container"
 
-  if [ "$RUNTIME" = "podman" ] && [ -n "$(podman_machine)" ] && podman_machine_running; then
+  if [ "$RUNTIME" = "podman" ] && podman_machine_running; then
     OTHERS=$(podman ps --format '{{.Names}}' | grep -vx "$NODE" || true)
     if [ -n "$OTHERS" ]; then
       note "Podman machine left running: other containers are still up ($(echo "$OTHERS" | tr '\n' ' '))"
@@ -67,20 +82,21 @@ stop() {
 }
 
 start() {
-  # The Podman machine may be stopped, in which case runtime detection fails until it is started.
-  if ! RUNTIME=$(scripts/container-runtime.sh); then
-    if [ -n "$(podman_machine)" ]; then
-      say "Starting Podman machine"
-      podman machine start >/dev/null
-      ok "Podman machine started"
-      RUNTIME=$(scripts/container-runtime.sh) || fail "podman is still not responding after 'podman machine start'."
-    else
-      fail "no usable container runtime found (need a working podman or docker)."
-    fi
+  # `make stop` may have stopped the Podman machine. Then runtime detection either fails or,
+  # when Docker is installed too, answers "docker" — where the node container does not exist.
+  RUNTIME=$(scripts/container-runtime.sh) || RUNTIME=""
+  if { [ -z "$RUNTIME" ] || ! node_exists "$RUNTIME"; } \
+    && [ -z "${CONTAINER_RUNTIME:-}" ] && podman_machine_exists && ! podman_machine_running; then
+    say "Starting Podman machine"
+    podman machine start >/dev/null
+    ok "Podman machine started"
+    podman info >/dev/null 2>&1 || fail "podman is still not responding after 'podman machine start'."
+    RUNTIME="podman"
   fi
+  [ -n "$RUNTIME" ] || fail "no usable container runtime found (need a working podman or docker)."
 
-  "$RUNTIME" container inspect "$NODE" >/dev/null 2>&1 \
-    || fail "container $NODE does not exist — the cluster was deleted. Run 'make setup-ha' to create it."
+  node_exists "$RUNTIME" \
+    || fail "container $NODE does not exist in $RUNTIME — the cluster was deleted. Run 'make setup-ha' to create it."
 
   say "Starting Kind node $NODE ($RUNTIME)"
   "$RUNTIME" start "$NODE" >/dev/null
@@ -169,15 +185,15 @@ start() {
   fi
 
   say "Checking endpoints"
-  for path in /secret /db-query; do
+  for url in http://localhost:8080/secret https://localhost:8443/secret http://localhost:8080/db-query; do
     CODE=000
     for i in $(seq 1 30); do
-      CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8080${path}" || true)
+      CODE=$(curl -sk -o /dev/null -w "%{http_code}" "$url" || true)
       [ "$CODE" = 200 ] && break
       sleep 3
     done
-    [ "$CODE" = 200 ] || fail "http://localhost:8080${path} returned HTTP $CODE"
-    ok "http://localhost:8080${path} -> HTTP 200"
+    [ "$CODE" = 200 ] || fail "$url returned HTTP $CODE"
+    ok "$url -> HTTP 200"
   done
 
   echo ""

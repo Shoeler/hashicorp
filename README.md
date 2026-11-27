@@ -116,7 +116,7 @@ make redeploy-app
 Pause the cluster and resume it later without re-initializing Vault (standalone mode, `make setup-ha`):
 
 ```bash
-make stop     # stops the Kind node and, if nothing else is running in it, the Podman machine
+make stop     # seals Vault, stops the Kind node and, if nothing else is running in it, the Podman machine
 make start    # starts both, unseals Vault with the key in vault-init.json, repairs Postgres
 ```
 

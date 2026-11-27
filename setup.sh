@@ -312,7 +312,8 @@ if [ "$REDEPLOY_ONLY" == "true" ]; then
   # In standalone mode, terraform needs the root token and mode from vault-init.json
   if [ -f vault-init.json ]; then
     export TF_VAR_vault_mode="standalone"
-    export TF_VAR_vault_dev_token=$(python3 -c "import json; print(json.load(open('vault-init.json'))['root_token'])")
+    TF_VAR_vault_dev_token=$(python3 -c "import json; print(json.load(open('vault-init.json'))['root_token'])")
+    export TF_VAR_vault_dev_token
     info "Standalone mode detected — loaded root token from vault-init.json"
   fi
   terraform apply -auto-approve -target=null_resource.flask_image -target=helm_release.flask_app

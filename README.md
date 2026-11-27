@@ -113,7 +113,7 @@ Rebuild and redeploy only the Flask app without touching the cluster:
 make redeploy-app
 ```
 
-Run the Flask app unit tests (requires `pytest`):
+Run the Flask app unit tests (creates a private `.venv` on first run; needs only `python3`):
 
 ```bash
 make test
@@ -396,6 +396,20 @@ Use the same runtime for `make redeploy-app` and `make teardown` as for `make se
 ### `could not download chart: Chart.yaml file is missing`
 
 Helm resolves a chart name to a local path before it looks in the repository. A stray directory in the project root named after a chart (for example a leftover `./vault/` data directory) shadows the real chart. `setup.sh` checks for this and tells you which directory to move or delete.
+
+### `could not download chart` with `429 Too Many Requests` or `docker-credential-desktop`
+
+The Envoy Gateway chart is pulled from Docker Hub (`oci://docker.io/envoyproxy`). The pull needs no login, but Helm sends any Docker Hub credentials it finds, and stale ones make the pull fail in Phase 1:
+
+- `failed to fetch oauth token: ... auth.docker.io/token: 429 Too Many Requests` — Helm has an old Docker Hub login stored. Remove it:
+
+  ```bash
+  helm registry logout registry-1.docker.io
+  ```
+
+- `exec: "docker-credential-desktop": executable file not found in $PATH` — `~/.docker/config.json` still names Docker Desktop's credential helper, but Docker Desktop is no longer installed. Delete the `"credsStore": "desktop"` line from that file.
+
+Check the fix with `helm pull oci://docker.io/envoyproxy/gateway-helm --version v1.2.0 -d /tmp`, then re-run `make setup`.
 
 ### Port already in use (8080, 8443, or 5001)
 

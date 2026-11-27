@@ -126,11 +126,11 @@ data "external" "envoy_http_port" {
       RETRIES=30
       SLEEP=3
       for ((i=1; i<=RETRIES; i++)); do
-        PORT=$(kubectl get svc \
+        PORT=$(kubectl --context kind-${var.cluster_name} get svc \
           -n envoy-gateway-system \
           -l gateway.envoyproxy.io/owning-gateway-name=eg \
           -o jsonpath='{.items[0].spec.ports[?(@.name=="http-80")].targetPort}' 2>/dev/null)
-        [ -z "$PORT" ] && PORT=$(kubectl get svc \
+        [ -z "$PORT" ] && PORT=$(kubectl --context kind-${var.cluster_name} get svc \
           -n envoy-gateway-system \
           -l gateway.envoyproxy.io/owning-gateway-name=eg \
           -o jsonpath='{.items[0].spec.ports[?(@.port==80)].targetPort}' 2>/dev/null)
@@ -187,16 +187,16 @@ data "external" "envoy_https_port" {
       RETRIES=60
       SLEEP=5
       for ((i=1; i<=RETRIES; i++)); do
-        if ! kubectl get secret flask-app-tls -n default >/dev/null 2>&1; then
+        if ! kubectl --context kind-${var.cluster_name} get secret flask-app-tls -n default >/dev/null 2>&1; then
           echo "Waiting for flask-app-tls secret... ($i/$RETRIES)" >&2
           sleep $SLEEP
           continue
         fi
-        PORT=$(kubectl get svc \
+        PORT=$(kubectl --context kind-${var.cluster_name} get svc \
           -n envoy-gateway-system \
           -l gateway.envoyproxy.io/owning-gateway-name=eg \
           -o jsonpath='{.items[0].spec.ports[?(@.name=="https-443")].targetPort}' 2>/dev/null)
-        [ -z "$PORT" ] && PORT=$(kubectl get svc \
+        [ -z "$PORT" ] && PORT=$(kubectl --context kind-${var.cluster_name} get svc \
           -n envoy-gateway-system \
           -l gateway.envoyproxy.io/owning-gateway-name=eg \
           -o jsonpath='{.items[0].spec.ports[?(@.port==443)].targetPort}' 2>/dev/null)

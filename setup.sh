@@ -135,6 +135,11 @@ for chart in vault vault-secrets-operator docker-registry gateway-helm; do
   fi
 done
 
+# Every kubectl call below targets the demo cluster explicitly, so a different current
+# context (another cluster, a work kubeconfig) cannot be read or modified by mistake.
+# Defined after the prerequisite check so `command -v kubectl` still tests the real binary.
+kubectl() { command kubectl --context "kind-${CLUSTER_NAME}" "$@"; }
+
 if [ "$REDEPLOY_ONLY" == "false" ]; then
 
   # 2. Create Kind cluster
@@ -195,7 +200,7 @@ EOF
   SLEEP=5
   VAULT_READY=false
   for ((i=1; i<=RETRIES; i++)); do
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/v1/sys/health || echo "000")
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/v1/sys/health || true)
     if [[ "$HTTP_CODE" =~ ^(200|429|472|473|501|503)$ ]]; then
       ok "Vault is reachable (HTTP $HTTP_CODE)"
       VAULT_READY=true
@@ -328,7 +333,7 @@ SLEEP=3
 SUCCESS=false
 
 for ((i=1; i<=RETRIES; i++)); do
-  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/secret)
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/secret || true)
   if [ "$HTTP_CODE" == "200" ]; then
     SUCCESS=true
     break

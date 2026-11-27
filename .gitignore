@@ -37,6 +37,8 @@ override.tf.json
 terraform.rc
 
 __pycache__/
+.venv/
+.pytest_cache/
 
 registry-config/
 

@@ -89,7 +89,7 @@ The HTTPS NodePort service (`gateway_nodeports_https` in `gateway.tf`) is create
 
 ### Dynamic secrets: Postgres + Vault database engine (`database.tf`)
 
-Deploys a Postgres pod and configures Vault's database secrets engine against it. Vault issues time-limited Postgres roles on demand; each credential set is unique and expires automatically. The `VaultDynamicSecret` (`db-creds`) holds the active lease. The Flask app exposes `/dynamic-secret` to show the current ephemeral credentials.
+Deploys a Postgres pod (data on the `postgres-data` PVC, so it survives pod restarts) and configures Vault's database secrets engine against it. Vault issues time-limited Postgres roles on demand; each credential set is unique and expires automatically. The `VaultDynamicSecret` (`db-creds`) holds the active lease. The Flask app exposes `/dynamic-secret` to show the current ephemeral credentials.
 
 Postgres is deployed in Phase 1 so it is running before Phase 3 configures the Vault database connection. `vault_database_secret_backend_connection` verifies connectivity on creation — if it fails, check `kubectl get pod -l app=postgres`.
 

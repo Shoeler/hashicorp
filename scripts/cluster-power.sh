@@ -63,7 +63,11 @@ stop() {
 
   say "Stopping Kind node $NODE ($RUNTIME)"
   "$RUNTIME" stop "$NODE" >/dev/null
-  ok "node stopped — cluster and Vault data are kept inside the stopped container"
+  if [ -f vault-init.json ]; then
+    ok "node stopped — cluster and Vault data are kept inside the stopped container"
+  else
+    ok "node stopped — the cluster is kept, but dev-mode Vault data is lost"
+  fi
 
   if [ "$RUNTIME" = "podman" ] && podman_machine_running; then
     OTHERS=$(podman ps --format '{{.Names}}' | grep -vx "$NODE" || true)
@@ -77,8 +81,13 @@ stop() {
   fi
 
   echo ""
-  echo "Stopped. Bring it back with: make start"
-  echo "Do NOT run 'make setup', 'make setup-ha' or 'make teardown' in between — they delete the cluster."
+  if [ -f vault-init.json ]; then
+    echo "Stopped. Bring it back with: make start"
+    echo "Do NOT run 'make setup', 'make setup-ha' or 'make teardown' in between — they delete the cluster."
+  else
+    echo "Stopped. Vault was in dev mode, so rebuild with 'make setup' (or 'make setup-ha' for a Vault"
+    echo "that survives a stop). 'make start' alone brings the cluster back with an empty Vault."
+  fi
 }
 
 start() {

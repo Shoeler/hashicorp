@@ -10,11 +10,12 @@ locals {
 }
 
 # Build and push the Flask app image before deploying.
-# Triggers re-build when Dockerfile or app source changes.
+# Triggers re-build when the Dockerfile, app source, or Python dependencies change.
 resource "null_resource" "flask_image" {
   triggers = {
-    dockerfile = filemd5("${path.module}/flask-app/Dockerfile")
-    app        = filemd5("${path.module}/flask-app/app.py")
+    dockerfile   = filemd5("${path.module}/flask-app/Dockerfile")
+    app          = filemd5("${path.module}/flask-app/app.py")
+    requirements = filemd5("${path.module}/flask-app/requirements.txt")
   }
 
   provisioner "local-exec" {

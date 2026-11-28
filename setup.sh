@@ -393,7 +393,9 @@ echo -e "${BOLD}${GREEN}  Setup complete!${NC}"
 hr
 echo ""
 echo -e "  ${BOLD}Cluster:${NC}    kubectl --context kind-${CLUSTER_NAME}"
-echo -e "  ${BOLD}Vault UI:${NC}   http://localhost:8080/ui/"
+# No trailing slash: some terminals' link detection runs a URL that ends in "/" at end of
+# line into the next line ("/ui/Vault"). Vault redirects /ui to /ui/.
+echo -e "  ${BOLD}Vault UI:${NC}   http://localhost:8080/ui"
 echo -e "  ${BOLD}Vault Token:${NC} ${SUMMARY_TOKEN}"
 if [ "$SUMMARY_MODE" == "standalone" ]; then
   echo -e "              (standalone mode — generated on init, saved in vault-init.json)"

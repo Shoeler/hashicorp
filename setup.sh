@@ -135,6 +135,18 @@ for chart in vault vault-secrets-operator docker-registry gateway-helm; do
   fi
 done
 
+# When a chart's repository URL matches a repo in `helm repo list`, Helm reads that repo's
+# cached index instead of fetching it. If the cache was cleared, the install fails with
+# "could not download chart: no cached repo found". Refresh the cache when repos are
+# configured. Non-fatal: with no repos configured Helm fetches the index from the URL.
+if [ -n "$(helm repo list 2>/dev/null)" ]; then
+  if helm repo update >/dev/null 2>&1; then
+    ok "helm repo cache refreshed"
+  else
+    info "helm repo update failed — continuing; chart downloads may fail if the Helm cache is stale"
+  fi
+fi
+
 # Every kubectl call below targets the demo cluster explicitly, so a different current
 # context (another cluster, a work kubeconfig) cannot be read or modified by mistake.
 # Defined after the prerequisite check so `command -v kubectl` still tests the real binary.

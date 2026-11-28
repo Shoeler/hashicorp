@@ -67,6 +67,8 @@ Terraform can't run a single `apply` because the Vault provider needs Vault to b
 
 `setup.sh` also refuses to run if a directory named after a Helm chart (`vault`, `vault-secrets-operator`, ...) exists in the project root without a `Chart.yaml` — Helm resolves chart names to local paths first, and such a directory produces `could not download chart: Chart.yaml file is missing`.
 
+`setup.sh` runs `helm repo update` in "Checking prerequisites" when `helm repo list` shows configured repos. If a chart's repository URL matches a configured repo and the Helm cache was cleared, the Helm provider otherwise fails with `could not download chart: no cached repo found`. The step is non-fatal and is skipped when no repos are configured.
+
 ### VSO resource dependency chain
 
 `VaultConnection` → `VaultAuth` → `VaultStaticSecret` / `VaultDynamicSecret` / `VaultPKISecret`
